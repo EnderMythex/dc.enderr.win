@@ -29,6 +29,11 @@ static STYLESHEET: LazyLock<String> = LazyLock::new(|| {
     let hash = dc_core::crypto::sha256_hex(include_str!("../assets/app.css"));
     format!("/assets/app.css?v={}", &hash[..12])
 });
+
+static SCRIPT: LazyLock<String> = LazyLock::new(|| {
+    let hash = dc_core::crypto::sha256_hex(include_str!("../assets/app.js"));
+    format!("/assets/app.js?v={}", &hash[..12])
+});
 const CDN: &str = "https://cdn.discordapp.com";
 
 // ---------------------------------------------------------------- icons
@@ -160,6 +165,7 @@ fn document(title: &str, body_class: &str, body: Markup) -> Markup {
                 title { (title) " · " (BRAND) }
                 link rel="stylesheet" href=(STYLESHEET.as_str());
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
+                script src=(SCRIPT.as_str()) defer {}
             }
             body class=(body_class) { (body) }
         }
@@ -248,6 +254,29 @@ pub fn login(error: Option<&str>) -> Markup {
                         "Only your id, username and avatar are read. "
                         "The panel never accesses your messages or servers."
                     }
+                }
+                (rule())
+                div.band.spacer {}
+                (footer())
+            }
+        },
+    )
+}
+
+/// Shown by the service worker while the panel restarts; reloads itself
+/// once the panel answers again (see `assets/app.js`).
+pub fn offline() -> Markup {
+    document(
+        "Reconnecting",
+        "public",
+        html! {
+            div.frame data-offline {
+                div.band.spacer {}
+                (rule())
+                main.band.hero {
+                    div.login-mark { (icon(ICON_LOGO)) }
+                    h1 { "Recovering connection" }
+                    p.lead { "The panel is restarting. This page comes back by itself in a few seconds." }
                 }
                 (rule())
                 div.band.spacer {}
@@ -605,7 +634,7 @@ pub fn bot_settings(
             div.notice.bad role="alert" { (message) }
         }
         @if let Some(user) = &bot.identity {
-            form.card.form method="post" enctype="multipart/form-data"
+            form.card.form method="post" enctype="multipart/form-data" data-track
                 action={ "/bots/" (bot.def.slug) "/profile" } {
                 (csrf_field(session))
                 h2 { "Profile" }
@@ -655,7 +684,7 @@ pub fn bot_settings(
                 }
             }
         }
-        form.card.form method="post" action={ "/bots/" (bot.def.slug) "/settings" } {
+        form.card.form method="post" action={ "/bots/" (bot.def.slug) "/settings" } data-track {
             (csrf_field(session))
             h2 { "Presence" }
             p.muted { "How the bot appears on Discord. Server features are configured per server, in the Servers tab." }
@@ -1173,7 +1202,7 @@ pub fn guild_config(
         @if module == DANGER {
             (danger_zone(session, &base))
         } @else {
-            form.card.form method="post" action={ (base) "/" (module) } {
+            form.card.form method="post" action={ (base) "/" (module) } data-track {
                 (csrf_field(session))
                 (guild_fields(module, context, config))
                 div.form-actions {

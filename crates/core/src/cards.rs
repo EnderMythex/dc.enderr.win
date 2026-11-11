@@ -24,6 +24,7 @@ pub enum Tone {
     Denied,
     Info,
     Confirm,
+    Gift,
 }
 
 impl Tone {
@@ -33,6 +34,7 @@ impl Tone {
             Self::Warning | Self::Confirm => "#f5a524",
             Self::Error | Self::Denied => "#ff5c5c",
             Self::Info => "#ededed",
+            Self::Gift => "#f5c542",
         }
     }
 
@@ -54,6 +56,9 @@ impl Tone {
             }
             Self::Confirm => {
                 r#"<path d="M-9 -9 a9 9 0 1 1 13 8 c-4 2 -4 4 -4 8" fill="none" stroke-width="6"/><circle cx="0" cy="17" r="3.6" stroke="none"/>"#
+            }
+            Self::Gift => {
+                r#"<rect x="-17" y="-4" width="34" height="22" rx="3" fill="none" stroke-width="4.5"/><rect x="-20" y="-11" width="40" height="8" rx="2.5" stroke="none"/><path d="M0 -11 V18" fill="none" stroke-width="4.5"/><path d="M0 -11 c-4 -9 -15 -9 -11 -2 c2 3 7 2 11 2 c4 0 9 1 11 -2 c4 -7 -7 -7 -11 2" fill="none" stroke-width="3.5"/>"#
             }
         }
     }
@@ -333,6 +338,7 @@ mod tests {
             Tone::Denied,
             Tone::Info,
             Tone::Confirm,
+            Tone::Gift,
         ] {
             let svg = banner(
                 tone,
@@ -436,6 +442,15 @@ mod tests {
             (
                 "banner-success.png",
                 banner(Tone::Success, "Sang", "Member banned", ""),
+            ),
+            (
+                "banner-gift.png",
+                banner(
+                    Tone::Gift,
+                    "Sang · Giveaway",
+                    "Discord Nitro (1 month)",
+                    "2 winners. Click Enter below to take part.",
+                ),
             ),
             (
                 "banner-confirm.png",

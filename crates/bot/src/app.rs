@@ -43,6 +43,8 @@ pub struct App {
     pub confirmations: Mutex<HashMap<String, crate::moderation::Pending>>,
     /// Servers where a role is being given to or taken from everyone.
     pub mass_roles: Mutex<std::collections::HashSet<String>>,
+    /// Giveaways whose entry count changed: their message is refreshed soon.
+    pub giveaways_changed: Mutex<std::collections::HashSet<(String, i64)>>,
 }
 
 pub struct Identity {
@@ -144,6 +146,7 @@ impl App {
             captchas: Mutex::default(),
             confirmations: Mutex::default(),
             mass_roles: Mutex::default(),
+            giveaways_changed: Mutex::default(),
         }
     }
 

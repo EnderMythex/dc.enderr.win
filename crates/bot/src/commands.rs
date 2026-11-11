@@ -292,6 +292,86 @@ pub fn all() -> Vec<Value> {
                 ),
             ],
         ),
+        command(
+            "giveaway",
+            "Run giveaways",
+            vec![
+                sub(
+                    "start",
+                    "Start a giveaway",
+                    vec![
+                        option(STRING, "prize", "What the winners get", true),
+                        option(
+                            STRING,
+                            "duration",
+                            "How long it runs: 30m, 2h, 3d… (30 days max)",
+                            true,
+                        ),
+                        {
+                            let mut winners = option(
+                                INTEGER,
+                                "winners",
+                                "Number of winners (1 by default)",
+                                false,
+                            );
+                            winners["min_value"] = json!(1);
+                            winners["max_value"] = json!(20);
+                            winners
+                        },
+                        channel(
+                            "channel",
+                            "Where to post it (defaults to this channel)",
+                            &TEXT_CHANNELS,
+                        ),
+                        option(
+                            ROLE,
+                            "required_role",
+                            "Only members with this role can enter",
+                            false,
+                        ),
+                    ],
+                ),
+                sub(
+                    "end",
+                    "End a giveaway now and draw its winners",
+                    vec![option(
+                        INTEGER,
+                        "id",
+                        "Giveaway number, e.g. 3 for #3",
+                        true,
+                    )],
+                ),
+                sub(
+                    "reroll",
+                    "Draw new winners for an ended giveaway",
+                    vec![
+                        option(INTEGER, "id", "Giveaway number, e.g. 3 for #3", true),
+                        {
+                            let mut winners = option(
+                                INTEGER,
+                                "winners",
+                                "How many new winners (1 by default)",
+                                false,
+                            );
+                            winners["min_value"] = json!(1);
+                            winners["max_value"] = json!(20);
+                            winners
+                        },
+                    ],
+                ),
+                sub(
+                    "cancel",
+                    "Cancel a giveaway without winners",
+                    vec![option(
+                        INTEGER,
+                        "id",
+                        "Giveaway number, e.g. 3 for #3",
+                        true,
+                    )],
+                ),
+                sub("list", "Show the running giveaways", vec![]),
+            ],
+        ),
         command("help", "List the bot's commands", vec![]),
     ]
 }

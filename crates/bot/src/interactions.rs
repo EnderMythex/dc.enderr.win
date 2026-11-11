@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::{
     api::ApiResult,
     app::{App, bits_of, roles_of, str_of},
-    moderation, settings, tickets,
+    giveaway, moderation, settings, tickets,
     ui::Msg,
     verify, xp,
 };
@@ -273,6 +273,7 @@ async fn command(ctx: &Ctx) {
         "kick" => moderation::kick(ctx, &options).await,
         "role" => moderation::role(ctx, &options).await,
         "xp" => xp::manage(ctx, &options).await,
+        "giveaway" => giveaway::command(ctx, &options).await,
         "settings" => settings::command(ctx, &options).await,
         _ => ctx.reply(Msg::error("Unknown command.")).await,
     }
@@ -285,6 +286,9 @@ async fn component(ctx: &Ctx) {
     }
     if id.starts_with("confirm:") {
         return moderation::confirmed(ctx).await;
+    }
+    if id.starts_with("giveaway:") {
+        return giveaway::component(ctx).await;
     }
     match id {
         "verify:start" => verify::start(ctx).await,

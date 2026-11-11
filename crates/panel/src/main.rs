@@ -90,6 +90,9 @@ fn app(state: AppState) -> Router {
         .route("/", get(routes::index))
         .route("/healthz", get(|| async { "ok" }))
         .route("/assets/app.css", get(routes::stylesheet))
+        .route("/assets/app.js", get(routes::script))
+        .route("/sw.js", get(routes::service_worker))
+        .route("/offline", get(routes::offline))
         .route("/assets/favicon.svg", get(routes::favicon))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
@@ -138,8 +141,10 @@ fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// No script at all and no inline style: the panel is server-rendered.
-const CSP: &str = "default-src 'none'; style-src 'self'; \
+/// Scripts and styles from the panel only, none inline. The pages are
+/// server-rendered and work without the script (`assets/app.js`).
+const CSP: &str = "default-src 'none'; style-src 'self'; script-src 'self'; \
+    connect-src 'self'; worker-src 'self'; manifest-src 'self'; \
     img-src 'self' https://cdn.discordapp.com; form-action 'self'; \
     base-uri 'none'; frame-ancestors 'none'";
 
@@ -160,6 +165,9 @@ async fn harden_and_log(State(state): State<AppState>, request: Request, next: N
 
     let in_activity = path.starts_with("/activity/");
     let headers = response.headers_mut();
+    // Tells the browser script and service worker that this answer comes
+    // from the panel itself, not from a proxy error page.
+    headers.insert("x-dc-panel", HeaderValue::from_static("1"));
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(if in_activity { ACTIVITY_CSP } else { CSP }),

@@ -21,6 +21,7 @@ pub const GREEN: u32 = 0x3ECF8E;
 pub const AMBER: u32 = 0xF5A524;
 pub const RED: u32 = 0xFF5C5C;
 pub const GREY: u32 = 0x4A4A4A;
+pub const GOLD: u32 = 0xF5C542;
 
 /// Discord allows 4000 characters of text per message; stay under it.
 const TEXT_LIMIT: usize = 3500;
@@ -69,6 +70,7 @@ fn tone_color(tone: Tone) -> u32 {
         Tone::Warning | Tone::Confirm => AMBER,
         Tone::Error | Tone::Denied => RED,
         Tone::Info => WHITE,
+        Tone::Gift => GOLD,
     }
 }
 
@@ -282,6 +284,18 @@ pub fn row(children: Vec<Value>) -> Value {
 
 pub fn button(style: u8, label: &str, custom_id: &str) -> Value {
     json!({ "type": 2, "style": style, "label": label, "custom_id": custom_id })
+}
+
+/// Button with an emoji before its label.
+pub fn emoji_button(style: u8, emoji: &str, label: &str, custom_id: &str) -> Value {
+    let mut value = button(style, label, custom_id);
+    value["emoji"] = json!({ "name": emoji });
+    value
+}
+
+pub fn disabled(mut component: Value) -> Value {
+    component["disabled"] = json!(true);
+    component
 }
 
 pub fn link_button(label: &str, url: &str) -> Value {

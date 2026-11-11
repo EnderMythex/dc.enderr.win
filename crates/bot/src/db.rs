@@ -51,6 +51,27 @@ pub async fn init(db: &SqlitePool) -> Result<(), sqlx::Error> {
             value    INTEGER NOT NULL,
             PRIMARY KEY (guild_id, name)
         )",
+        "CREATE TABLE IF NOT EXISTS giveaways (
+            guild_id      TEXT NOT NULL,
+            number        INTEGER NOT NULL,
+            channel_id    TEXT NOT NULL,
+            message_id    TEXT NOT NULL DEFAULT '',
+            prize         TEXT NOT NULL,
+            winners       INTEGER NOT NULL,
+            ends_at       INTEGER NOT NULL,
+            host_id       TEXT NOT NULL,
+            required_role TEXT,
+            ended         INTEGER NOT NULL DEFAULT 0,
+            winner_ids    TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (guild_id, number)
+        )",
+        "CREATE INDEX IF NOT EXISTS giveaways_due ON giveaways (ended, ends_at)",
+        "CREATE TABLE IF NOT EXISTS giveaway_entries (
+            guild_id TEXT NOT NULL,
+            number   INTEGER NOT NULL,
+            user_id  TEXT NOT NULL,
+            PRIMARY KEY (guild_id, number, user_id)
+        )",
         "CREATE TABLE IF NOT EXISTS panels (
             guild_id   TEXT NOT NULL,
             kind       TEXT NOT NULL,
@@ -312,6 +333,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn giveaway_lifecycle() {
+        let db = memory().await;
+        let mut giveaway = Giveaway {
+            guild_id: "g".into(),
+            number: 0,
+            channel_id: "c".into(),
+            message_id: String::new(),
+            prize: "Nitro".into(),
+            winners: 1,
+            ends_at: 100,
+            host_id: "h".into(),
+            required_role: None,
+            ended: false,
+            winner_ids: String::new(),
+        };
+        assert_eq!(create_giveaway(&db, &giveaway).await.unwrap(), 1);
+        giveaway.number = create_giveaway(&db, &giveaway).await.unwrap();
+        assert_eq!(giveaway.number, 2);
+        // Not due until its message exists.
+        assert!(due_giveaways(&db, 200).await.unwrap().is_empty());
+        set_giveaway_message(&db, "g", 2, "m").await.unwrap();
+        assert_eq!(due_giveaways(&db, 99).await.unwrap().len(), 0);
+        assert_eq!(due_giveaways(&db, 100).await.unwrap()[0].number, 2);
+
+        assert!(enter_giveaway(&db, "g", 2, "a").await.unwrap());
+        assert!(!enter_giveaway(&db, "g", 2, "a").await.unwrap());
+        assert!(enter_giveaway(&db, "g", 2, "b").await.unwrap());
+        assert_eq!(count_entries(&db, "g", 2).await.unwrap(), 2);
+        assert!(leave_giveaway(&db, "g", 2, "b").await.unwrap());
+        assert_eq!(giveaway_entries(&db, "g", 2).await.unwrap(), vec!["a"]);
+
+        // Drawn once only.
+        assert!(
+            finish_giveaway(&db, "g", 2, &["a".into()], false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !finish_giveaway(&db, "g", 2, &["b".into()], false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            finish_giveaway(&db, "g", 2, &["c".into()], true)
+                .await
+                .unwrap()
+        );
+        let ended = get_giveaway(&db, "g", 2).await.unwrap().unwrap();
+        assert!(ended.ended);
+        assert_eq!(ended.winner_list(), vec!["a", "c"]);
+        assert!(due_giveaways(&db, 200).await.unwrap().is_empty());
+
+        delete_giveaway(&db, "g", 2).await.unwrap();
+        assert!(get_giveaway(&db, "g", 2).await.unwrap().is_none());
+        assert_eq!(count_entries(&db, "g", 2).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn xp_accumulates_and_ranks() {
         let db = memory().await;
         assert_eq!(
@@ -379,4 +458,208 @@ mod tests {
         delete_panel(&db, "g", "rules").await.unwrap();
         assert!(get_panel(&db, "g", "rules").await.unwrap().is_none());
     }
+}
+
+// ---------------------------------------------------------------- giveaways
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct Giveaway {
+    pub guild_id: String,
+    pub number: i64,
+    pub channel_id: String,
+    pub message_id: String,
+    pub prize: String,
+    pub winners: i64,
+    pub ends_at: i64,
+    pub host_id: String,
+    pub required_role: Option<String>,
+    pub ended: bool,
+    /// Every winner drawn so far, rerolls included, comma-separated.
+    pub winner_ids: String,
+}
+
+impl Giveaway {
+    pub fn winner_list(&self) -> Vec<String> {
+        self.winner_ids
+            .split(',')
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+const GIVEAWAY_COLUMNS: &str = "guild_id, number, channel_id, message_id, prize, winners, \
+    ends_at, host_id, required_role, ended, winner_ids";
+
+/// Creates a giveaway and returns its number on the server (#1, #2...).
+pub async fn create_giveaway(db: &SqlitePool, giveaway: &Giveaway) -> Result<i64, sqlx::Error> {
+    let number: i64 = sqlx::query_scalar(
+        "INSERT INTO counters (guild_id, name, value) VALUES (?, 'giveaway', 1)
+         ON CONFLICT (guild_id, name) DO UPDATE SET value = value + 1
+         RETURNING value",
+    )
+    .bind(&giveaway.guild_id)
+    .fetch_one(db)
+    .await?;
+    sqlx::query(
+        "INSERT INTO giveaways (guild_id, number, channel_id, prize, winners, ends_at, host_id, required_role)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&giveaway.guild_id)
+    .bind(number)
+    .bind(&giveaway.channel_id)
+    .bind(&giveaway.prize)
+    .bind(giveaway.winners)
+    .bind(giveaway.ends_at)
+    .bind(&giveaway.host_id)
+    .bind(&giveaway.required_role)
+    .execute(db)
+    .await?;
+    Ok(number)
+}
+
+pub async fn set_giveaway_message(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    message: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE giveaways SET message_id = ? WHERE guild_id = ? AND number = ?")
+        .bind(message)
+        .bind(guild)
+        .bind(number)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+pub async fn get_giveaway(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+) -> Result<Option<Giveaway>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {GIVEAWAY_COLUMNS} FROM giveaways WHERE guild_id = ? AND number = ?"
+    ))
+    .bind(guild)
+    .bind(number)
+    .fetch_optional(db)
+    .await
+}
+
+/// Giveaways of a server that are still running, soonest first.
+pub async fn running_giveaways(db: &SqlitePool, guild: &str) -> Result<Vec<Giveaway>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {GIVEAWAY_COLUMNS} FROM giveaways WHERE guild_id = ? AND ended = 0 ORDER BY ends_at"
+    ))
+    .bind(guild)
+    .fetch_all(db)
+    .await
+}
+
+/// Running giveaways, on every server, whose time is up.
+pub async fn due_giveaways(db: &SqlitePool, now: i64) -> Result<Vec<Giveaway>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {GIVEAWAY_COLUMNS} FROM giveaways WHERE ended = 0 AND ends_at <= ? AND message_id != ''"
+    ))
+    .bind(now)
+    .fetch_all(db)
+    .await
+}
+
+/// Marks a giveaway ended (or adds rerolled winners). `false` when it was
+/// already ended by someone else, so it is never drawn twice.
+pub async fn finish_giveaway(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    winners: &[String],
+    reroll: bool,
+) -> Result<bool, sqlx::Error> {
+    let done = if reroll {
+        sqlx::query(
+            "UPDATE giveaways
+             SET winner_ids = CASE WHEN winner_ids = '' THEN ?1 ELSE winner_ids || ',' || ?1 END
+             WHERE guild_id = ?2 AND number = ?3 AND ended = 1",
+        )
+    } else {
+        sqlx::query(
+            "UPDATE giveaways SET ended = 1, winner_ids = ?1
+             WHERE guild_id = ?2 AND number = ?3 AND ended = 0",
+        )
+    }
+    .bind(winners.join(","))
+    .bind(guild)
+    .bind(number)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn delete_giveaway(db: &SqlitePool, guild: &str, number: i64) -> Result<(), sqlx::Error> {
+    for table in ["giveaway_entries", "giveaways"] {
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE guild_id = ? AND number = ?"
+        ))
+        .bind(guild)
+        .bind(number)
+        .execute(db)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Adds an entry; `false` when the member had already entered.
+pub async fn enter_giveaway(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    user: &str,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "INSERT OR IGNORE INTO giveaway_entries (guild_id, number, user_id) VALUES (?, ?, ?)",
+    )
+    .bind(guild)
+    .bind(number)
+    .bind(user)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn leave_giveaway(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    user: &str,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "DELETE FROM giveaway_entries WHERE guild_id = ? AND number = ? AND user_id = ?",
+    )
+    .bind(guild)
+    .bind(number)
+    .bind(user)
+    .execute(db)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn giveaway_entries(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT user_id FROM giveaway_entries WHERE guild_id = ? AND number = ?")
+        .bind(guild)
+        .bind(number)
+        .fetch_all(db)
+        .await
+}
+
+pub async fn count_entries(db: &SqlitePool, guild: &str, number: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM giveaway_entries WHERE guild_id = ? AND number = ?")
+        .bind(guild)
+        .bind(number)
+        .fetch_one(db)
+        .await
 }

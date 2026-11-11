@@ -8,6 +8,7 @@ mod api;
 mod app;
 mod commands;
 mod db;
+mod giveaway;
 mod interactions;
 mod logs;
 mod massrole;
@@ -94,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(bot = %def.slug, "starting {}", def.name);
     tokio::spawn(panels::watch(app.clone()));
     tokio::spawn(requests::watch(app.clone()));
+    tokio::spawn(giveaway::watch(app.clone()));
 
     // Privileged intents must be enabled on the Developer Portal. Without
     // them Discord closes the connection: fall back to what is allowed.

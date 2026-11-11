@@ -6,7 +6,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Path | Role |
 | --- | --- |
 | `crates/core` (`dc-core`) | Bot registry (`bots/*/bot.toml`), per-server configuration, image rendering, panel-to-bot requests, SQLite helpers. Shared by the panel and the bot. |
-| `crates/panel` (`dc-panel`) | The panel: Axum, server-rendered HTML with Maud, no JavaScript (except the verification Activity page), Docker control via `bollard`. |
+| `crates/panel` (`dc-panel`) | The panel: Axum, server-rendered HTML with Maud (works without JavaScript; a small script adds the unsaved-changes bar and reconnection screen), Docker control via `bollard`. |
 | `crates/bot` (`dc-bot`) | The bot run in each container. Every message uses Discord's Components V2, with image banners and cards. |
 | `bots/<slug>/` | One folder per bot, created by the admin. |
 
@@ -52,6 +52,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Rules + verification | `/settings rules` | Rules: text, button / captcha image / Activity, verified role, role removed once verified |
 | Tickets | `/settings tickets` | Tickets: panel, category, staff, topics, transcripts |
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |
+| Giveaways | `/giveaway start\|end\|reroll\|cancel\|list`: Enter button with live count, optional required role, automatic draw, rerolls without previous winners | — |
 | Settings panel | `/settings view`: image of the configuration, a menu per module, buttons and pickers to change it; `/help` | Everything |
 
 **Who is an admin?** Moderation and settings commands are reserved to: the
@@ -183,10 +184,15 @@ names Coolify gives to containers do not matter.
   server page also requires the bot to be on that server (404 otherwise).
 - Everything saved from the dashboard is validated and bounded before it is written.
 - Bot tokens stay in each bot's `.env` (or in `DISCORD_TOKEN_<SLUG>` variables) and are never displayed or baked into images.
-- Strict CSP (`default-src 'none'`), no inline script or style. The only script
-  is the one of the verification Activity (`/activity/<slug>`), which is public,
-  holds no panel session, and can only result in "this Discord account passed
-  the captcha of this server".
+- Strict CSP (`default-src 'none'`), scripts from the panel only, no inline
+  script or style. Every page works without JavaScript; `assets/app.js` adds the
+  unsaved-changes bar and the "Recovering connection" screen, and a service
+  worker (`/sw.js`) shows that screen instead of the proxy's error page while
+  the panel restarts. Answers from the panel carry an `x-dc-panel` header so
+  the two can be told apart.
+- The verification Activity (`/activity/<slug>`) is public, holds no panel
+  session, and can only result in "this Discord account passed the captcha of
+  this server".
 - A bot's name, bio, picture and banner can be changed by its owners; uploads are limited to
   images (2 MB, banner 4 MB) and sent straight to Discord, never stored.
 - The bot never pings `@everyone` or roles from user-provided text.

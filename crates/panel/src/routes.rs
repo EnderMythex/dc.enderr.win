@@ -70,6 +70,31 @@ pub async fn stylesheet() -> impl IntoResponse {
     )
 }
 
+pub async fn script() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        include_str!("../assets/app.js"),
+    )
+}
+
+/// The service worker; served from the root so it covers every page.
+pub async fn service_worker() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../assets/sw.js"),
+    )
+}
+
+pub async fn offline() -> impl IntoResponse {
+    views::offline()
+}
+
 pub async fn favicon() -> impl IntoResponse {
     (
         [
