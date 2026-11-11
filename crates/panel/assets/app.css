@@ -405,6 +405,7 @@ body.public {
 
 /* ------------------------------------------------------------ bot profile */
 
+.banner-preview { width: 100%; height: auto; max-height: 220px; margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; object-fit: cover; }
 .profile { display: flex; align-items: flex-start; gap: 16px; margin-top: 8px; }
 .profile .avatar { margin-top: 20px; }
 input[type="file"] { width: 100%; padding: 7px; border: 1px dashed var(--border-strong); border-radius: 8px; background: #000; color: var(--muted); font: 13px var(--font); cursor: pointer; }

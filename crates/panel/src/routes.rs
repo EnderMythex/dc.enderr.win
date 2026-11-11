@@ -206,8 +206,20 @@ pub async fn bot_settings(
 ) -> Page {
     let def = owned_bot(&state, &session, &slug).await?;
     let settings = BotSettings::load(&def.dir)?;
+    let bio = match def.token() {
+        Some(token) => state.discord.bot_bio(&token).await,
+        None => None,
+    };
     let bot = BotView::load(&state, def).await;
-    Ok(views::bot_settings(&session, &bot, &settings, flash.text(), None).into_response())
+    let page = views::bot_settings(
+        &session,
+        &bot,
+        &settings,
+        bio.as_deref(),
+        flash.text(),
+        None,
+    );
+    Ok(page.into_response())
 }
 
 #[derive(Deserialize)]
@@ -235,9 +247,20 @@ pub async fn save_settings(
         Ok(settings) => settings,
         Err(error) => {
             let current = BotSettings::load(&def.dir)?;
+            let bio = match def.token() {
+                Some(token) => state.discord.bot_bio(&token).await,
+                None => None,
+            };
             let bot = BotView::load(&state, def).await;
-            let page =
-                views::bot_settings(&session, &bot, &current, None, Some(&error.to_string()));
+            let message = error.to_string();
+            let page = views::bot_settings(
+                &session,
+                &bot,
+                &current,
+                bio.as_deref(),
+                None,
+                Some(&message),
+            );
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response());
         }
     };
@@ -249,6 +272,10 @@ pub async fn save_settings(
 
 /// Largest picture accepted for a bot's avatar.
 const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
+/// Largest picture accepted for a bot's banner.
+const MAX_BANNER_BYTES: usize = 4 * 1024 * 1024;
+/// Longest bio Discord accepts for an application.
+pub const MAX_BIO_CHARS: usize = 400;
 
 /// MIME type of an image, from its first bytes.
 fn image_type(bytes: &[u8]) -> Option<&'static str> {
@@ -275,90 +302,179 @@ fn image_type(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// POST /bots/{slug}/profile — the bot's name and picture on Discord.
-pub async fn save_profile(
-    State(state): State<AppState>,
-    session: Session,
-    Path(slug): Path<String>,
-    mut form: Multipart,
-) -> Page {
-    let too_large = AppError::BadRequest("The picture is too large (2 MB at most).");
-    let (mut csrf, mut username, mut picture) = (String::new(), String::new(), Vec::new());
+/// `data:` URI of an uploaded picture, or why it is refused.
+fn image_data(bytes: &[u8], max: usize, what: &str) -> Result<String, String> {
+    if bytes.len() > max {
+        return Err(format!(
+            "The {what} is too large ({} MB at most).",
+            max / 1024 / 1024
+        ));
+    }
+    let mime = image_type(bytes)
+        .ok_or_else(|| format!("The {what} must be a PNG, JPEG, GIF or WebP image."))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+/// Normalizes a bio: Windows line breaks, spaces around.
+fn clean_bio(bio: &str) -> String {
+    bio.replace("\r\n", "\n").trim().to_owned()
+}
+
+#[derive(Default)]
+struct ProfileForm {
+    csrf: String,
+    username: String,
+    bio: Option<String>,
+    avatar: Vec<u8>,
+    banner: Vec<u8>,
+    remove_banner: bool,
+}
+
+async fn read_profile_form(mut form: Multipart) -> Result<ProfileForm, AppError> {
+    let mut out = ProfileForm::default();
     while let Some(field) = form.next_field().await.map_err(|_| too_large_or_bad())? {
-        match field.name() {
-            Some("csrf") => csrf = field.text().await.map_err(|_| too_large_or_bad())?,
-            Some("username") => username = field.text().await.map_err(|_| too_large_or_bad())?,
-            Some("avatar") => {
-                picture = field
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "avatar" | "banner" => {
+                let bytes = field
                     .bytes()
                     .await
                     .map_err(|_| too_large_or_bad())?
                     .to_vec();
+                if name == "avatar" {
+                    out.avatar = bytes;
+                } else {
+                    out.banner = bytes;
+                }
+            }
+            "csrf" | "username" | "bio" | "remove_banner" => {
+                let text = field.text().await.map_err(|_| too_large_or_bad())?;
+                match name.as_str() {
+                    "csrf" => out.csrf = text,
+                    "username" => out.username = text,
+                    "bio" => out.bio = Some(text),
+                    _ => out.remove_banner = true,
+                }
             }
             _ => {}
         }
     }
-    session.check_csrf(&csrf)?;
+    Ok(out)
+}
+
+/// POST /bots/{slug}/profile — the bot's name, bio, picture and banner.
+pub async fn save_profile(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+    form: Multipart,
+) -> Page {
+    let form = read_profile_form(form).await?;
+    session.check_csrf(&form.csrf)?;
     let def = owned_bot(&state, &session, &slug).await?;
     let token = def.token().ok_or(AppError::NotFound)?;
     let current = state.discord.bot_identity(Some(&token)).await;
 
-    let username = username.trim();
-    let new_name = (!username.is_empty()
+    let mut changes = serde_json::Map::new();
+    let mut problem = None;
+    let username = form.username.trim();
+    let renamed = !username.is_empty()
         && current
             .as_ref()
-            .is_none_or(|user| user.username != username))
-    .then_some(username);
-    let mut problem = None;
-    if new_name.is_some_and(|name| !(2..=32).contains(&name.chars().count())) {
-        problem = Some("The name must be 2 to 32 characters long.".to_owned());
+            .is_none_or(|user| user.username != username);
+    if renamed {
+        if (2..=32).contains(&username.chars().count()) {
+            changes.insert("username".into(), username.into());
+        } else {
+            problem = Some("The name must be 2 to 32 characters long.".to_owned());
+        }
     }
-    let mut avatar = None;
-    if !picture.is_empty() {
-        if picture.len() > MAX_AVATAR_BYTES {
-            return Err(too_large);
-        }
-        match image_type(&picture) {
-            Some(mime) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&picture);
-                avatar = Some(format!("data:{mime};base64,{encoded}"));
+    if !form.avatar.is_empty() {
+        match image_data(&form.avatar, MAX_AVATAR_BYTES, "picture") {
+            Ok(data) => {
+                changes.insert("avatar".into(), data.into());
             }
-            None => problem = Some("The picture must be a PNG, JPEG, GIF or WebP image.".into()),
+            Err(reason) => problem = Some(reason),
         }
+    }
+    if !form.banner.is_empty() {
+        match image_data(&form.banner, MAX_BANNER_BYTES, "banner") {
+            Ok(data) => {
+                changes.insert("banner".into(), data.into());
+            }
+            Err(reason) => problem = Some(reason),
+        }
+    } else if form.remove_banner {
+        changes.insert("banner".into(), serde_json::Value::Null);
+    }
+    let bio = form.bio.as_deref().map(clean_bio);
+    if bio
+        .as_ref()
+        .is_some_and(|bio| bio.chars().count() > MAX_BIO_CHARS)
+    {
+        problem = Some(format!(
+            "The bio must be {MAX_BIO_CHARS} characters at most."
+        ));
     }
 
-    if problem.is_none() && (new_name.is_some() || avatar.is_some()) {
-        let updated = state
-            .discord
-            .update_bot_profile(&token, new_name, avatar.as_deref())
-            .await;
-        match updated {
+    if problem.is_none() && !changes.is_empty() {
+        let fields: Vec<String> = changes.keys().cloned().collect();
+        match state.discord.update_bot_profile(&token, changes).await {
             Ok(_) => tracing::info!(
-                user = %session.user.id, bot = %def.slug,
-                name = new_name.is_some(), avatar = avatar.is_some(), "bot profile updated"
+                user = %session.user.id, bot = %def.slug, fields = %fields.join(","),
+                "bot profile updated"
             ),
-            Err(DiscordError::Rejected(reason)) => problem = Some(reason),
-            Err(DiscordError::RateLimited) => {
-                problem = Some(
-                    "Discord limits how often a bot's profile can change. Try again later.".into(),
-                );
-            }
-            Err(error) => return Err(error.into()),
+            Err(error) => problem = Some(profile_problem(error)?),
+        }
+    }
+    if problem.is_none()
+        && let Some(bio) = bio
+        && state
+            .discord
+            .bot_bio(&token)
+            .await
+            .is_some_and(|current| current != bio)
+    {
+        match state.discord.update_bot_bio(&token, &bio).await {
+            Ok(()) => tracing::info!(user = %session.user.id, bot = %def.slug, "bot bio updated"),
+            Err(error) => problem = Some(profile_problem(error)?),
         }
     }
 
     if let Some(problem) = problem {
         let settings = BotSettings::load(&def.dir)?;
+        let bio = state.discord.bot_bio(&token).await;
         let bot = BotView::load(&state, def).await;
-        let page = views::bot_settings(&session, &bot, &settings, None, Some(&problem));
+        let page = views::bot_settings(
+            &session,
+            &bot,
+            &settings,
+            bio.as_deref(),
+            None,
+            Some(&problem),
+        );
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response());
     }
     Ok(Redirect::to(&format!("/bots/{}/settings?m=profile", def.slug)).into_response())
 }
 
+/// What to tell the user when Discord refuses a profile change.
+fn profile_problem(error: DiscordError) -> Result<String, AppError> {
+    match error {
+        DiscordError::Rejected(reason) => Ok(reason),
+        DiscordError::RateLimited => {
+            Ok("Discord limits how often a bot's profile can change. Try again later.".into())
+        }
+        error => Err(error.into()),
+    }
+}
+
 /// A multipart body that could not be read: almost always an oversized file.
 fn too_large_or_bad() -> AppError {
-    AppError::BadRequest("The form could not be read. The picture must be 2 MB at most.")
+    AppError::BadRequest(
+        "The form could not be read. The picture must be 2 MB at most, the banner 4 MB.",
+    )
 }
 
 #[derive(Deserialize)]
@@ -390,4 +506,36 @@ pub async fn power(
     }
     tracing::info!(user = %session.user.id, bot = %def.slug, action = form.action, "power action");
     Ok(Redirect::to(&format!("/bots/{}?m={flash}", def.slug)).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uploaded_images() {
+        let png = [0x89, b'P', b'N', b'G', 0, 0];
+        assert!(
+            image_data(&png, 10, "picture")
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+        assert!(
+            image_data(b"hello", 10, "banner")
+                .unwrap_err()
+                .contains("banner")
+        );
+        assert!(
+            image_data(&png, 3, "banner")
+                .unwrap_err()
+                .contains("too large")
+        );
+        let webp = *b"RIFF\0\0\0\0WEBPVP8 ";
+        assert_eq!(image_type(&webp), Some("image/webp"));
+    }
+
+    #[test]
+    fn bios() {
+        assert_eq!(clean_bio("  Hello\r\nWorld  "), "Hello\nWorld");
+    }
 }

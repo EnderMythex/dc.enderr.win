@@ -118,8 +118,8 @@ fn app(state: AppState) -> Router {
         )
         .route(
             "/bots/{slug}/profile",
-            // Room for a 2 MB picture and the rest of the form.
-            post(routes::save_profile).layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+            // Room for a 2 MB picture, a 4 MB banner and the rest of the form.
+            post(routes::save_profile).layer(DefaultBodyLimit::max(7 * 1024 * 1024)),
         )
         .route("/bots/{slug}/power", post(routes::power))
         .route("/activity/{slug}", get(activity::page))

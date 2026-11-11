@@ -37,6 +37,9 @@ pub struct DiscordUser {
     pub username: String,
     pub global_name: Option<String>,
     pub avatar: Option<String>,
+    /// Profile banner (image hash), when set.
+    #[serde(default)]
+    pub banner: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,24 +188,49 @@ impl Discord {
         fetched
     }
 
-    /// Changes the bot's username and / or avatar (a `data:` URI). Discord
-    /// allows two username changes per hour.
+    /// Changes the bot's account: `username`, `avatar` and `banner` (`data:`
+    /// URIs, or null to remove). Discord allows two username changes per hour.
     pub async fn update_bot_profile(
         &self,
         token: &str,
-        username: Option<&str>,
-        avatar: Option<&str>,
+        changes: serde_json::Map<String, serde_json::Value>,
     ) -> Result<DiscordUser, DiscordError> {
+        let updated = self.patch(token, "/users/@me", changes).await?;
+        let user: DiscordUser = serde_json::from_value(updated)
+            .map_err(|_| DiscordError::Status(StatusCode::BAD_GATEWAY))?;
+        if let Ok(mut cache) = self.identities.lock() {
+            cache.insert(sha256_hex(token), (Instant::now(), Some(user.clone())));
+        }
+        Ok(user)
+    }
+
+    /// The bot's bio: the description of its application, shown in the
+    /// "About me" of its profile. `None` when it cannot be read.
+    pub async fn bot_bio(&self, token: &str) -> Option<String> {
+        let application: serde_json::Value = self
+            .get("/applications/@me", &format!("Bot {token}"))
+            .await
+            .map_err(|error| tracing::warn!(%error, "reading the bot's application failed"))
+            .ok()?;
+        Some(application["description"].as_str().unwrap_or("").to_owned())
+    }
+
+    pub async fn update_bot_bio(&self, token: &str, bio: &str) -> Result<(), DiscordError> {
         let mut body = serde_json::Map::new();
-        if let Some(username) = username {
-            body.insert("username".into(), username.into());
-        }
-        if let Some(avatar) = avatar {
-            body.insert("avatar".into(), avatar.into());
-        }
+        body.insert("description".into(), bio.into());
+        self.patch(token, "/applications/@me", body).await?;
+        Ok(())
+    }
+
+    async fn patch(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, DiscordError> {
         let response = self
             .http
-            .patch(format!("{}/users/@me", self.api))
+            .patch(format!("{}{path}", self.api))
             .header(reqwest::header::AUTHORIZATION, format!("Bot {token}"))
             .json(&body)
             .send()
@@ -211,11 +239,7 @@ impl Discord {
             let details: serde_json::Value = response.json().await.unwrap_or_default();
             return Err(DiscordError::Rejected(rejection_reason(&details)));
         }
-        let user: DiscordUser = check(response)?.json().await?;
-        if let Ok(mut cache) = self.identities.lock() {
-            cache.insert(sha256_hex(token), (Instant::now(), Some(user.clone())));
-        }
-        Ok(user)
+        Ok(check(response)?.json().await?)
     }
 
     /// A user's avatar as PNG, for the image previews.

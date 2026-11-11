@@ -593,6 +593,7 @@ pub fn bot_settings(
     session: &Session,
     bot: &BotView,
     settings: &BotSettings,
+    bio: Option<&str>,
     flash: Option<&str>,
     error: Option<&str>,
 ) -> Markup {
@@ -608,7 +609,11 @@ pub fn bot_settings(
                 action={ "/bots/" (bot.def.slug) "/profile" } {
                 (csrf_field(session))
                 h2 { "Profile" }
-                p.muted { "The bot's name and picture on Discord." }
+                p.muted { "How the bot's profile looks on Discord." }
+                @if let Some(hash) = &user.banner {
+                    img.banner-preview src={ (CDN) "/banners/" (user.id) "/" (hash) ".png?size=600" }
+                        alt="Current banner" width="600" height="240";
+                }
                 div.profile {
                     img.avatar.lg src=(bot_avatar(bot)) alt="" width="64" height="64";
                     div.field.grow {
@@ -618,11 +623,33 @@ pub fn bot_settings(
                         p.hint { "Discord allows two name changes per hour." }
                     }
                 }
-                div.field {
-                    label for="avatar" { "New picture" }
-                    input #avatar type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp";
-                    p.hint { "PNG, JPEG, GIF or WebP, 2 MB at most. Leave empty to keep the current one." }
+                @match bio {
+                    Some(bio) => div.field {
+                        label for="bio" { "Bio" }
+                        textarea #bio name="bio" rows="4" maxlength=(crate::routes::MAX_BIO_CHARS) { (bio) }
+                        p.hint { "The \"About me\" of the bot's profile, 400 characters at most. Discord formatting works." }
+                    },
+                    None => p.hint { "The bio cannot be read right now; it is left unchanged." },
                 }
+                div.field-row {
+                    div.field {
+                        label for="avatar" { "New picture" }
+                        input #avatar type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp";
+                        p.hint { "PNG, JPEG, GIF or WebP, 2 MB at most." }
+                    }
+                    div.field {
+                        label for="banner" { "New banner" }
+                        input #banner type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp";
+                        p.hint { "Wide image (about 600 × 240), 4 MB at most." }
+                    }
+                }
+                @if user.banner.is_some() {
+                    label.check {
+                        input type="checkbox" name="remove_banner" value="on";
+                        span { "Remove the current banner" }
+                    }
+                }
+                p.hint { "Leave the files empty to keep the current images." }
                 div.form-actions {
                     button.btn.primary type="submit" { "Save profile" }
                 }

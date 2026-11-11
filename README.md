@@ -31,7 +31,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
   only see their bots; other bots return 404. Ids in `ADMIN_IDS` (panel `.env`)
   see and manage every bot. `bot.toml` changes need no panel restart.
 - **From the panel**, owners start / stop / restart the container, read its
-  logs, set the bot's name, picture and presence, and configure each server
+  logs, set the bot's name, bio, picture, banner and presence, and configure each server
   the bot is in. The bot notices saved changes within a few seconds — no restart.
 - Each server section shows a **preview** of what the bot posts (with the real
   images) and a **test button** that makes the running bot send it. The
@@ -187,8 +187,8 @@ names Coolify gives to containers do not matter.
   is the one of the verification Activity (`/activity/<slug>`), which is public,
   holds no panel session, and can only result in "this Discord account passed
   the captcha of this server".
-- A bot's name and picture can be changed by its owners; uploads are limited to
-  2 MB images and sent straight to Discord, never stored.
+- A bot's name, bio, picture and banner can be changed by its owners; uploads are limited to
+  images (2 MB, banner 4 MB) and sent straight to Discord, never stored.
 - The bot never pings `@everyone` or roles from user-provided text.
 
 ## Development
