@@ -137,9 +137,18 @@ fn count(n: usize, one: &str, many: &str) -> Shown {
     }
 }
 
+/// The verification mode, `none` when it is off.
+fn verify_mode(rules: &dc_core::guild::Rules) -> &str {
+    if rules.verifying() {
+        &rules.verification
+    } else {
+        "none"
+    }
+}
+
 /// Image of the overview: one row per module.
 fn home_rows(names: &Names, config: &GuildConfig) -> Vec<Row> {
-    let verification = label_of(VERIFY_MODES, &config.rules.verification);
+    let verification = label_of(VERIFY_MODES, verify_mode(&config.rules));
     let admins = &config.admins;
     vec![
         Row::new(
@@ -244,7 +253,7 @@ fn module_rows(names: &Names, config: &GuildConfig, module: &str) -> Vec<Row> {
                 Row::new(
                     "Verification",
                     "",
-                    Shown::Chip(label_of(VERIFY_MODES, &r.verification)),
+                    Shown::Chip(label_of(VERIFY_MODES, verify_mode(r))),
                 ),
                 Row::new(
                     "Captcha style",
@@ -462,7 +471,7 @@ fn module_controls(config: &GuildConfig, module: &str) -> Vec<Value> {
                     "settings:mode:verification",
                     "Verification",
                     VERIFY_MODES,
-                    &[r.verification.as_str()],
+                    &[verify_mode(r)],
                     1,
                 ),
             ));
@@ -688,6 +697,7 @@ pub async fn command(ctx: &Ctx, options: &Options) {
                 rules.channel = Some(channel);
             }
             if let Some(mode) = id("verification") {
+                rules.verify_enabled = Some(mode != "none");
                 rules.verification = mode;
             }
             if let Some(role) = id("role") {
@@ -813,7 +823,11 @@ fn apply(config: &mut GuildConfig, kind: &str, target: &str, values: &[String]) 
         ("roles", "admins") => config.admins.roles = values.to_vec(),
         ("users", "admins") => config.admins.users = values.to_vec(),
 
-        ("mode", "verification") => config.rules.verification = first?,
+        ("mode", "verification") => {
+            let mode = first?;
+            config.rules.verify_enabled = Some(mode != "none");
+            config.rules.verification = mode;
+        }
         ("mode", "captcha_style") => config.rules.captcha_style = first?,
         ("mode", "announce") => config.xp.announce = first?,
         ("logkinds", _) => {
@@ -983,6 +997,9 @@ mod tests {
         assert_eq!(config.xp.announce, "channel");
         let config = applied("mode", "verification", &["activity"]).unwrap();
         assert_eq!(config.rules.verification, "activity");
+        assert!(config.rules.verifying());
+        let config = applied("mode", "verification", &["none"]).unwrap();
+        assert!(!config.rules.verifying());
         // Bad values are fixed by sanitize, as for the dashboard.
         let config = applied("mode", "verification", &["magic"]).unwrap();
         assert_eq!(config.rules.verification, "button");

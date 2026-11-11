@@ -159,7 +159,7 @@ fn bot(state: &AppState, slug: &str) -> Option<(BotDef, String)> {
 /// Is this server verifying members with that mode (`activity` or `web`)?
 fn uses(config: &GuildConfig, mode: &str) -> bool {
     let rules = &config.rules;
-    rules.enabled && rules.verification == mode && rules.verified_role.is_some()
+    rules.verifying() && rules.verification == mode && rules.verified_role.is_some()
 }
 
 fn failure(message: &str) -> Json<Value> {
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn modes_need_the_full_setup() {
         let mut config = GuildConfig::default();
-        config.rules.enabled = true;
+        config.rules.verify_enabled = Some(true);
         config.rules.verification = "web".into();
         assert!(!uses(&config, "web"));
         config.rules.verified_role = Some(GUILD.into());

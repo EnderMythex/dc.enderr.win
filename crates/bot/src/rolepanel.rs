@@ -11,6 +11,8 @@ use crate::{
 };
 
 pub const PREFIX: &str = "role:";
+/// Buttons of panels posted by the former Scanline bot, still answered.
+pub const OLD_PREFIX: &str = "role-toggle:";
 
 pub fn panel(config: &GuildConfig) -> Msg {
     let panel = &config.role_panel;
@@ -38,7 +40,12 @@ pub fn panel(config: &GuildConfig) -> Msg {
 
 /// A button of the panel: toggles the role.
 pub async fn toggle(ctx: &Ctx) {
-    let role = ctx.custom_id().trim_start_matches(PREFIX).to_owned();
+    let id = ctx.custom_id();
+    let role = id
+        .strip_prefix(OLD_PREFIX)
+        .or_else(|| id.strip_prefix(PREFIX))
+        .unwrap_or_default()
+        .to_owned();
     // Only roles of the current panel: an old or forged button gives nothing.
     let config = ctx.config();
     let offered =

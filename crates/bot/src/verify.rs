@@ -16,14 +16,15 @@ use crate::{
 const CAPTCHA_LIFETIME: Duration = Duration::from_secs(300);
 const MAX_ATTEMPTS: u32 = 3;
 
-/// The rules panel posted in the rules channel.
+/// The rules panel posted in the rules channel, with the Verify button when
+/// the verification has no channel of its own.
 pub fn panel(config: &GuildConfig) -> Msg {
     let rules = &config.rules;
     let mut children = vec![
         ui::text(format!("# {}", rules.title)),
         ui::text(rules.text.clone()),
     ];
-    if rules.verification != "none" {
+    if rules.verify_under_rules() {
         children.push(ui::separator());
         children.push(ui::section_button(
             "**Accept the rules** to get access to the server.",
@@ -31,6 +32,25 @@ pub fn panel(config: &GuildConfig) -> Msg {
         ));
     }
     Msg::card(ui::WHITE, children)
+}
+
+/// The verification message, when it has a channel of its own.
+pub fn verify_panel(config: &GuildConfig) -> Msg {
+    let rules = &config.rules;
+    Msg::card(
+        ui::WHITE,
+        vec![
+            ui::text(format!("# {}", rules.verify_title)),
+            ui::text(rules.verify_text.clone()),
+            ui::separator(),
+            ui::row(vec![ui::emoji_button(
+                ui::STYLE_SUCCESS,
+                "✅",
+                "Verify",
+                "verify:start",
+            )]),
+        ],
+    )
 }
 
 /// The Activity needs the application's client secret on the panel's side;
@@ -43,7 +63,7 @@ fn activity_configured(app: &App) -> bool {
 pub async fn start(ctx: &Ctx) {
     let config = ctx.config();
     let rules = &config.rules;
-    let Some(role) = rules.verified_role.as_deref().filter(|_| rules.enabled) else {
+    let Some(role) = rules.verified_role.as_deref().filter(|_| rules.verifying()) else {
         let text = "Verification is not fully set up yet. Ask an administrator.";
         return ctx
             .reply(Msg::warning("Unavailable", text).ephemeral())
@@ -291,7 +311,7 @@ pub enum GrantError {
 pub async fn grant_roles(app: &App, guild_id: &str, user_id: &str) -> Result<(), GrantError> {
     let config = app.config(guild_id);
     let rules = &config.rules;
-    let Some(role) = rules.verified_role.as_deref().filter(|_| rules.enabled) else {
+    let Some(role) = rules.verified_role.as_deref().filter(|_| rules.verifying()) else {
         return Err(GrantError::NotSetUp);
     };
     if let Err(error) = app.api.add_role(guild_id, user_id, role, "Verified").await {
@@ -341,15 +361,27 @@ mod tests {
     #[test]
     fn panel_has_button_only_when_verifying() {
         let mut config = GuildConfig::default();
-        config.rules.verification = "none".into();
+        config.rules.enabled = true;
+        config.rules.channel = Some("175928847299117061".into());
         let plain = panel(&config).payload().to_string();
         assert!(!plain.contains("verify:start"));
 
+        config.rules.verify_enabled = Some(true);
         for mode in ["button", "captcha", "activity"] {
             config.rules.verification = mode.into();
             let with_button = panel(&config).payload().to_string();
             assert!(with_button.contains("verify:start"));
             assert!(with_button.contains("Server rules"));
         }
+        // A verification channel of its own: the button leaves the rules.
+        config.rules.verify_channel = Some("175928847299117062".into());
+        assert!(
+            !panel(&config)
+                .payload()
+                .to_string()
+                .contains("verify:start")
+        );
+        let own = verify_panel(&config).payload().to_string();
+        assert!(own.contains("verify:start") && own.contains("Verification"));
     }
 }

@@ -1,0 +1,95 @@
+{
+  "format": "dc.enderr.win/server-settings",
+  "version": 1,
+  "bot": "scanline",
+  "server": {
+    "id": "1374730463943327774",
+    "name": "ScanLine - Memecoins"
+  },
+  "note": "Settings of the former Scanline bot (its .env and source code). Import it on the dashboard: Servers > ScanLine - Memecoins > Backup.",
+  "settings": {
+    "welcome": {
+      "enabled": false,
+      "dm_enabled": true,
+      "dm_text": "On est content de t'avoir parmi nous ! Ceci est le seul MP automatique que tu recevras du bot officiel Scanline. Avant de te lancer, quelques rappels importants pour ta sécurité.\n\n**🤖 Commandes disponibles**\n**/filters**\nReçois mes filtres à importer (Axiom ou Terminal)\n**/tools**\nLiens utiles : Axiom, Mockape, Incinerator, tweets en temps réel et salons du serveur\n**/tuto-terminal**\nReçois le tuto de configuration de Terminal (Padre)\n**/wallet-tracker**\nReçois mon wallet tracker Axiom à importer",
+      "dm_text_en": "Glad to have you with us! This is the only automated DM you'll get from the official Scanline bot. Before you dive in, a few important safety reminders.\n\n**🤖 Available commands**\n**/filters**\nGet my filters to import (Axiom or Terminal)\n**/tools**\nUseful links: Axiom, Mockape, Incinerator, real-time tweets and server channels\n**/tuto-terminal**\nGet the Terminal (Padre) setup tutorial\n**/wallet-tracker**\nGet my Axiom wallet tracker to import",
+      "dm_safety": true,
+      "dm_links": [
+        { "label": "Start trading on Axiom - 30% fees off", "url": "https://axiom.trade/@ender0x" },
+        { "label": "Start trading on FOMO - 10% fees off", "url": "https://fomo.family/r/endermythex_" }
+      ]
+    },
+    "rules": {
+      "enabled": false,
+      "verify_enabled": true,
+      "verify_channel": null,
+      "verify_title": "🛡️ Vérification / Verification",
+      "verify_text": "Clique sur le bouton, puis choisis la bonne couleur pour accéder au serveur.\nClick the button, then pick the right color to access the server.",
+      "verification": "colors",
+      "verified_role": "1422209318413144064",
+      "remove_role": null
+    },
+    "lock_url": {
+      "enabled": true,
+      "scope": "listed",
+      "channels": [
+        "1374733723001552997",
+        "1421945885306126527",
+        "1374733745243947018",
+        "1429099620318838955",
+        "1537125134962393179",
+        "1374733786499121192",
+        "1484440453632884756"
+      ],
+      "allowed_domains": [
+        "klipy.com",
+        "tenor.com",
+        "tiktok.com",
+        "instagram.com",
+        "cdn.discordapp.com",
+        "x.com",
+        "twitter.com"
+      ],
+      "x_blocked_channels": ["1374733745243947018"],
+      "review_channel": "1553873641802829894",
+      "timeout_secs": 60
+    },
+    "anti_scam": {
+      "invites": true,
+      "insider": true,
+      "images": true,
+      "staff_channel": "1553873641802829894"
+    },
+    "role_panel": {
+      "enabled": true,
+      "channel": null,
+      "title": "🔔 Attribue-toi des rôles",
+      "buttons": [
+        { "role": "1539375800124571801", "label": "Twitch Stream Alert", "emoji": "🟣", "description": "Sois notifié quand nos streamers passent en live sur Twitch." },
+        { "role": "1535669289024233625", "label": "Langue FR", "emoji": "🇫🇷", "description": "Reçois les communications en français." },
+        { "role": "1535669406913527838", "label": "Langue EN", "emoji": "🇬🇧", "description": "Reçois les communications en anglais." },
+        { "role": "1374811509540257882", "label": "Débutant", "emoji": "🌱", "description": "Tu débutes dans le trading de memecoins." },
+        { "role": "1421243616336019487", "label": "Intermédiaire", "emoji": "📈", "description": "Tu as déjà de l'expérience en trading." }
+      ]
+    },
+    "assistant": {
+      "enabled": true,
+      "context": "",
+      "channels": [],
+      "max_length": 600,
+      "cooldown_secs": 8
+    },
+    "twitch": {
+      "enabled": true,
+      "channel": "1539368849084915793",
+      "role": "1539375800124571801",
+      "logins": ["dh_trenches", "junkocry"]
+    },
+    "reminders": {
+      "enabled": true,
+      "channel_fr": "1374733723001552997",
+      "channel_en": "1421945885306126527",
+      "interval_hours": 48
+    }
+  }
+}

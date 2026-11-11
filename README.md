@@ -37,6 +37,9 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
   images) and a **test button** that makes the running bot send it. The
   **Danger zone** resets a server to its defaults (optionally erasing its XP)
   or removes the bot from the server.
+- **Backup** exports a server's settings as a JSON file and imports one back
+  (on the same server, another server or another bot). Only the sections in the
+  file are replaced, so a file can carry a single section.
 - The panel only touches containers labelled `win.enderr.dc.bot=<slug>`.
 
 ## The bot
@@ -50,7 +53,8 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Roles | `/role add\|remove`, `/role add-all\|remove-all` (every member, with confirmation) | Welcome: roles given on arrival |
 | Levels | `/rank` (image card) `/leaderboard` (image) `/xp add\|remove\|reset` | Levels: XP rates, announcements, role rewards |
 | Welcome | `/settings welcome`, `/settings preview` | Welcome: channel, message, image; mentions of new members in chosen channels, deleted after a few seconds |
-| Rules + verification | `/settings rules` | Rules: text, verification (button, captcha image, website link, Activity), captcha style (text or slide), verified role, role removed once verified |
+| Rules | `/settings rules` | Rules: channel, title, text (can be turned off to keep only the verification) |
+| Verification | `/settings rules` | Verification: Verify button under the rules or in a message of its own in another channel; mode (button, colors, captcha image, website link, Activity), captcha style (text or slide), verified role, role removed once verified |
 | Tickets | `/settings tickets` | Tickets: panel, category, staff, topics, transcripts |
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |
 | Announcements | `/announce` (form with title and text, picture, @everyone / @here / role) · `/maintenance start\|end` | — |
@@ -70,7 +74,7 @@ server owner, members with Discord's Administrator permission, the bot's
 *Admins* section or with `/ownerbot`. Only the server owner and the bot's
 owners can change that list from Discord.
 
-The rules panel and the ticket panel are posted and kept up to date by the bot
+The rules, verification, role and ticket panels are posted and kept up to date by the bot
 itself: change a text or a channel on the dashboard and the message follows.
 
 ### Discord application setup
@@ -93,7 +97,7 @@ point is kept).
 With the *Website* verification mode, the Verify button gives each member a
 personal link to `/verify/<slug>` on the panel, signed with the bot's token
 for that member and server and valid for 10 minutes. The page shows the
-captcha chosen in the Rules section: **Text** (type the code of an image) or
+captcha chosen in the Verification section: **Text** (type the code of an image) or
 **Slide** (slide a puzzle piece into its hole). Nothing to set up besides the
 bot's `DASHBOARD_URL`, which tells it the panel's address.
 
@@ -109,7 +113,7 @@ per bot; until it is done, members get the image captcha instead.
 2. **OAuth2**: add any redirect URI (for example `https://dc.enderr.win`) — it is
    never opened, but Discord requires one — and copy the **Client Secret** into
    `bots/<slug>/.env` as `DISCORD_CLIENT_SECRET=...`.
-3. Restart the bot, then choose *Activity* in the dashboard's Rules section.
+3. Restart the bot, then choose *Activity* in the dashboard's Verification section.
 
 The page identifies the member with Discord's OAuth2 (`identify` scope) through
 the Activity itself, shows the captcha, and the bot then gives the roles.
@@ -122,6 +126,11 @@ A bot can ship extra content in `bots/<slug>/assets/`, enabled with
 assistant's default knowledge (`assistant.md`); see
 `bots/scanline/assets/README.md`. The presence can also show the SOL price
 (Settings → Activity → SOL price).
+
+The former Scanline bot's settings (channels, roles, welcome DM, link lock,
+role panel, Twitch, reminders) are in `bots/scanline/import/scanline-settings.json`:
+import it in the server's *Backup* section. Panels posted by the former bot
+(Verify and role buttons) keep working.
 
 ## Adding a bot
 

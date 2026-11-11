@@ -359,7 +359,7 @@ async fn component(ctx: &Ctx) {
     if id.starts_with("giveaway:") {
         return giveaway::component(ctx).await;
     }
-    if id.starts_with(rolepanel::PREFIX) {
+    if id.starts_with(rolepanel::PREFIX) || id.starts_with(rolepanel::OLD_PREFIX) {
         return rolepanel::toggle(ctx).await;
     }
     if id.starts_with(verify::COLOR_PREFIX) {
@@ -378,7 +378,8 @@ async fn component(ctx: &Ctx) {
         return antiscam::unban(ctx).await;
     }
     match id {
-        "verify:start" => verify::start(ctx).await,
+        // `verify-start`: the panel of the former Scanline bot.
+        "verify:start" | "verify-start" | "verify-start:en" => verify::start(ctx).await,
         "verify:enter" => verify::ask_code(ctx).await,
         "ticket:open" | "ticket:topic" => tickets::open(ctx).await,
         "ticket:claim" => tickets::claim(ctx).await,

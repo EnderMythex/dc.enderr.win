@@ -18,7 +18,7 @@ use crate::{
     auth::Session,
     discord::{Channel, Discord, Guild, GuildContext, Role},
     docker::{ActionError, HealthState, LogLine, Status},
-    guilds::{DANGER, MODULES},
+    guilds::{BACKUP, DANGER, MODULES},
     routes::BotView,
 };
 
@@ -55,6 +55,7 @@ const ICON_PLAY: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill=
 const ICON_STOP: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>"#;
 const ICON_RESTART: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></svg>"#;
 const ICON_EXTERNAL: &str = r#"<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M11 6H6v12h12v-5"/></svg>"#;
+const ICON_DOWNLOAD: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>"#;
 const ICON_BACK: &str = r#"<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>"#;
 const ICON_ARROW: &str = r#"<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>"#;
 
@@ -969,8 +970,28 @@ fn guild_fields(
         }
         "rules" => {
             let rules = &config.rules;
+            html! {
+                h2 { "Rules" }
+                (switch("enabled", "Post the rules message", "The bot posts it in the channel below and keeps it up to date. Turn it off to only use the verification.", rules.enabled))
+                (channel_select("channel", "Rules channel", "", text_channels(), &rules.channel))
+                (field("title", "Title", "", html! {
+                    input #title type="text" name="title" value=(rules.title) maxlength="80" required;
+                }))
+                (textarea("text", "Rules", "Discord formatting works: **bold**, lists, links.", &rules.text, 9, 1800))
+                p.hint {
+                    @if rules.verify_under_rules() {
+                        "The Verify button is shown under the rules. To post it in a message of its own, choose another channel in the Verification section."
+                    } @else if rules.verifying() {
+                        "The verification has its own message (Verification section)."
+                    } @else {
+                        "The verification is off (Verification section)."
+                    }
+                }
+            }
+        }
+        "verification" => {
+            let rules = &config.rules;
             let modes = [
-                ("none", "None — rules only"),
                 ("button", "Button — one click to accept"),
                 ("colors", "Colors — click the button of the right color"),
                 ("captcha", "Captcha — type the code from an image"),
@@ -982,14 +1003,20 @@ fn guild_fields(
                 ("slide", "Slide — slide a puzzle piece into place"),
             ];
             html! {
-                h2 { "Rules and verification" }
-                (switch("enabled", "Post the rules panel", "The bot posts the panel in the channel below and keeps it up to date.", rules.enabled))
-                (channel_select("channel", "Rules channel", "", text_channels(), &rules.channel))
-                (field("title", "Title", "", html! {
-                    input #title type="text" name="title" value=(rules.title) maxlength="80" required;
+                h2 { "Verification" }
+                (switch("enabled", "Verify new members", "Members click Verify, pass the check below and get the verified role.", rules.verifying()))
+                @if rules.verifying() && rules.verified_role.is_none() {
+                    div.notice.warn role="status" { "Choose the verified role below, or nobody can be verified." }
+                }
+                @if rules.verifying() && !rules.verify_under_rules() && rules.verify_message_channel().is_none() {
+                    div.notice.warn role="status" { "The Verify button is posted nowhere yet: choose a verification channel, or turn the rules message on." }
+                }
+                (channel_select("channel", "Verification channel", "Empty or the rules channel: the Verify button goes under the rules. Another channel: the bot posts a verification message of its own there, with the title and text below.", text_channels(), &rules.verify_channel))
+                (field("title", "Title of the verification message", "", html! {
+                    input #title type="text" name="title" value=(rules.verify_title) maxlength="80" required;
                 }))
-                (textarea("text", "Rules", "Discord formatting works: **bold**, lists, links.", &rules.text, 9, 1800))
-                (choice("verification", "Verification", "How members prove they accept the rules. Website gives each member a personal link to a captcha page. The Activity opens it inside Discord but needs a one-time setup by the administrator; until then members get the image captcha.", &modes, &rules.verification))
+                (textarea("text", "Text of the verification message", "", &rules.verify_text, 3, 1800))
+                (choice("verification", "How members verify", "Website gives each member a personal link to a captcha page. The Activity opens it inside Discord but needs a one-time setup by the administrator; until then members get the image captcha.", &modes, &rules.verification))
                 (choice("captcha_style", "Captcha on the website and in the Activity", "", &styles, &rules.captcha_style))
                 (field("role", "Verified role", "Given once verified. Use it to unlock the rest of the server.", html! {
                     select #role name="role" { (role_options(roles, rules.verified_role.as_deref())) }
@@ -1231,15 +1258,24 @@ fn guild_preview(
                 "Sends this message to the welcome channel, as if you had just joined.",
             )
         }
-        "rules" => {
+        "rules" | "verification" => {
             let rules = &config.rules;
-            let blocks = html! {
-                p.dtitle { (rules.title) }
-                p.dtext { (rules.text) }
-                @if rules.verification != "none" {
-                    div.dsplit {
-                        p.dtext { strong { "Accept the rules" } " to get access to the server." }
-                        span.dbtn.ok { "Verify" }
+            let own = module == "verification" && !rules.verify_under_rules();
+            let blocks = if own {
+                html! {
+                    p.dtitle { (rules.verify_title) }
+                    p.dtext { (rules.verify_text) }
+                    span.dbtn.ok { "✅ Verify" }
+                }
+            } else {
+                html! {
+                    p.dtitle { (rules.title) }
+                    p.dtext { (rules.text) }
+                    @if rules.verify_under_rules() {
+                        div.dsplit {
+                            p.dtext { strong { "Accept the rules" } " to get access to the server." }
+                            span.dbtn.ok { "Verify" }
+                        }
                     }
                 }
             };
@@ -1250,12 +1286,19 @@ fn guild_preview(
                     img.captcha src={ (base) "/preview/captcha.png" } alt="Sample captcha" width="460" height="170" loading="lazy";
                 }
             };
-            (
-                blocks,
-                extra,
-                "Post the panel again",
-                "Deletes the rules panel and posts it again at the bottom of its channel.",
-            )
+            let (label, hint) = if own {
+                (
+                    "Post the message again",
+                    "Deletes the verification message and posts it again at the bottom of its channel.",
+                )
+            } else {
+                (
+                    "Post the panel again",
+                    "Deletes the rules panel and posts it again at the bottom of its channel.",
+                )
+            };
+            let module = if own { "verification" } else { "rules" };
+            return preview_card(session, bot, blocks, extra, base, module, label, hint);
         }
         "tickets" => {
             let tickets = &config.tickets;
@@ -1306,6 +1349,22 @@ fn guild_preview(
         }
         _ => return html! {},
     };
+    preview_card(
+        session, bot, blocks, extra, base, module, test_label, test_hint,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_card(
+    session: &Session,
+    bot: &BotView,
+    blocks: Markup,
+    extra: Markup,
+    base: &str,
+    module: &str,
+    test_label: &str,
+    test_hint: &str,
+) -> Markup {
     html! {
         section.card.form {
             h2 { "Preview" }
@@ -1327,9 +1386,8 @@ fn danger_zone(session: &Session, base: &str) -> Markup {
             (csrf_field(session))
             h2 { "Danger zone" }
             p.muted {
-                "Puts every section of this server back to its defaults: admins, welcome, rules, "
-                "tickets, levels, logs and link lock. The bot takes its rules and ticket panels "
-                "down. This cannot be undone."
+                "Puts every section of this server back to its defaults. The bot takes its "
+                "panels down. This cannot be undone: export the settings first (Backup)."
             }
             label.check {
                 input type="checkbox" name="xp" value="on";
@@ -1362,6 +1420,142 @@ fn danger_zone(session: &Session, base: &str) -> Markup {
     }
 }
 
+fn backup(session: &Session, base: &str, guild: &str) -> Markup {
+    html! {
+        section.card.form {
+            h2 { "Export the settings" }
+            p.muted {
+                "Downloads every setting of " strong { (guild) } " as a JSON file: keep it as a "
+                "backup, or import it on another server or another bot."
+            }
+            div.form-actions {
+                a.btn.primary href={ (base) "/export" } download { (icon(ICON_DOWNLOAD)) "Download the settings" }
+            }
+        }
+        form.card.form method="post" action={ (base) "/import" } enctype="multipart/form-data" {
+            (csrf_field(session))
+            h2 { "Import settings" }
+            p.muted {
+                "Only the sections in the file are replaced (a file with just "
+                code { "twitch" } " only changes Twitch); the others stay as they are. "
+                "Channel and role ids must exist on this server."
+            }
+            (field("file", "Settings file", "A file downloaded above, 512 KB at most.", html! {
+                input #file type="file" name="file" accept=".json,application/json";
+            }))
+            (textarea("json", "Or paste the settings", "", "", 6, 500_000))
+            div.form-actions {
+                button.btn.primary type="submit" { "Import" }
+            }
+        }
+    }
+}
+
+/// Is a section in use? `None` for sections without an on/off state.
+fn section_on(config: &GuildConfig, id: &str) -> Option<bool> {
+    Some(match id {
+        "welcome" => {
+            let w = &config.welcome;
+            w.enabled || w.dm_enabled || !w.ping_channels.is_empty()
+        }
+        "rules" => config.rules.enabled,
+        "verification" => config.rules.verifying(),
+        "tickets" => config.tickets.enabled,
+        "levels" => config.xp.enabled,
+        "logs" => config.logs.enabled,
+        "links" => config.lock_url.enabled,
+        "security" => {
+            let a = &config.anti_scam;
+            a.invites || a.insider || a.images
+        }
+        "roles" => config.role_panel.enabled,
+        "assistant" => config.assistant.enabled,
+        "twitch" => config.twitch.enabled,
+        "reminders" => config.reminders.enabled,
+        _ => return None,
+    })
+}
+
+/// Sections of the sidebar, by group.
+const NAV_GROUPS: &[(&str, &[&str])] = &[
+    ("Server", &["admins", "logs", BACKUP]),
+    (
+        "Members",
+        &["welcome", "rules", "verification", "roles", "levels"],
+    ),
+    ("Protection", &["links", "security", "reminders"]),
+    ("Community", &["tickets", "assistant", "twitch"]),
+];
+
+fn section_icon(id: &str) -> &'static str {
+    match id {
+        "admins" => r#"<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>"#,
+        "logs" => r#"<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>"#,
+        "welcome" => {
+            r#"<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-7 7-7s7 3 7 7M19 8v6M16 11h6"/>"#
+        }
+        "rules" => r#"<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M9 8h3"/>"#,
+        "verification" => r#"<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>"#,
+        "roles" => r#"<path d="M3 12V3h9l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>"#,
+        "levels" => r#"<path d="M5 20v-7M12 20V5M19 20v-10"/>"#,
+        "links" => {
+            r#"<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>"#
+        }
+        "security" => r#"<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5h.01"/>"#,
+        "reminders" => r#"<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>"#,
+        "tickets" => r#"<path d="M4 5h16v11H9l-5 4z"/>"#,
+        "assistant" => {
+            r#"<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/>"#
+        }
+        "twitch" => {
+            r#"<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>"#
+        }
+        "backup" => r#"<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>"#,
+        _ => r#"<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>"#,
+    }
+}
+
+fn section_label(id: &str) -> &'static str {
+    match id {
+        BACKUP => "Backup",
+        DANGER => "Danger zone",
+        _ => MODULES
+            .iter()
+            .find(|(module, _)| *module == id)
+            .map_or("", |(_, label)| label),
+    }
+}
+
+/// The sections of a server, grouped, with a dot for the ones in use.
+fn side_nav(base: &str, config: &GuildConfig, module: &str) -> Markup {
+    let link = |id: &str| {
+        let active = id == module;
+        html! {
+            a.side-link.active[active].danger[id == DANGER] href={ (base) "/" (id) }
+                aria-current=[active.then_some("page")] {
+                svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" {
+                    (PreEscaped(section_icon(id)))
+                }
+                span.side-label { (section_label(id)) }
+                @if let Some(on) = section_on(config, id) {
+                    span.state-dot.on[on] title=(if on { "On" } else { "Off" }) {}
+                }
+            }
+        }
+    };
+    html! {
+        nav.side-nav aria-label="Server settings" {
+            @for (group, ids) in NAV_GROUPS {
+                p.side-group { (group) }
+                @for id in *ids { (link(id)) }
+            }
+            div.side-sep {}
+            (link(DANGER))
+        }
+    }
+}
+
 pub fn guild_config(
     session: &Session,
     bot: &BotView,
@@ -1374,12 +1568,6 @@ pub fn guild_config(
     let guild = &context.guild;
     let servers = format!("/bots/{}/servers", bot.def.slug);
     let base = format!("{servers}/{}", guild.id);
-    let pill = |id: &str, label: &str| {
-        html! {
-            a.pill.active[id == module].danger[id == DANGER] href={ (base) "/" (id) }
-                aria-current=[(id == module).then_some("page")] { (label) }
-        }
-    };
     let content = html! {
         @if let Some(message) = error {
             div.notice.bad role="alert" { (message) }
@@ -1397,21 +1585,32 @@ pub fn guild_config(
             }
             a.btn.small href=(servers) { (icon(ICON_BACK)) "All servers" }
         }
-        nav.pills aria-label="Server settings" {
-            @for (id, label) in MODULES { (pill(id, label)) }
-            (pill(DANGER, "Danger zone"))
+        // Small screens: the sections fold into a menu.
+        details.side-menu {
+            summary {
+                span.side-group { "Section" }
+                strong { (section_label(module)) }
+            }
+            (side_nav(&base, config, module))
         }
-        @if module == DANGER {
-            (danger_zone(session, &base))
-        } @else {
-            form.card.form method="post" action={ (base) "/" (module) } data-track {
-                (csrf_field(session))
-                (guild_fields(module, bot, context, config))
-                div.form-actions {
-                    button.btn.primary type="submit" { "Save" }
+        div.guild-layout {
+            (side_nav(&base, config, module))
+            div.guild-main {
+                @if module == DANGER {
+                    (danger_zone(session, &base))
+                } @else if module == BACKUP {
+                    (backup(session, &base, &guild.name))
+                } @else {
+                    form.card.form method="post" action={ (base) "/" (module) } data-track {
+                        (csrf_field(session))
+                        (guild_fields(module, bot, context, config))
+                        div.form-actions {
+                            button.btn.primary type="submit" { "Save" }
+                        }
+                    }
+                    (guild_preview(session, bot, context, config, module, &base))
                 }
             }
-            (guild_preview(session, bot, context, config, module, &base))
         }
     };
     bot_page(session, bot, Tab::Servers, flash, content)

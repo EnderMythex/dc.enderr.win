@@ -97,6 +97,12 @@ pub async fn sync(app: &App, guild_id: &str) {
         .map(|channel| (channel, verify::panel(&config)));
     sync_one(app, guild_id, "rules", rules).await;
 
+    let verification = config
+        .rules
+        .verify_message_channel()
+        .map(|channel| (channel.to_owned(), verify::verify_panel(&config)));
+    sync_one(app, guild_id, "verification", verification).await;
+
     let ticket_panel = config
         .tickets
         .panel_channel

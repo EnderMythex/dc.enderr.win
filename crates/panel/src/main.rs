@@ -131,6 +131,14 @@ fn app(state: AppState) -> Router {
             post(guilds::test),
         )
         .route("/bots/{slug}/servers/{guild_id}/reset", post(guilds::reset))
+        .route(
+            "/bots/{slug}/servers/{guild_id}/export",
+            get(guilds::export),
+        )
+        .route(
+            "/bots/{slug}/servers/{guild_id}/import",
+            post(guilds::import).layer(DefaultBodyLimit::max(1024 * 1024)),
+        )
         .route("/bots/{slug}/servers/{guild_id}/leave", post(guilds::leave))
         .route(
             "/bots/{slug}/servers/{guild_id}/preview/{image}",

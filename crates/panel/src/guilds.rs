@@ -3,7 +3,7 @@
 //! the bot picks up within a few seconds.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::header,
     response::{IntoResponse, Redirect},
 };
@@ -14,6 +14,7 @@ use dc_core::{
     requests::{Answer, Request},
 };
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::{
     AppState,
@@ -30,6 +31,7 @@ pub const MODULES: &[(&str, &str)] = &[
     ("admins", "Admins"),
     ("welcome", "Welcome"),
     ("rules", "Rules"),
+    ("verification", "Verification"),
     ("tickets", "Tickets"),
     ("levels", "Levels"),
     ("logs", "Logs"),
@@ -43,11 +45,14 @@ pub const MODULES: &[(&str, &str)] = &[
 
 /// Extra page next to the sections: reset of the whole server.
 pub const DANGER: &str = "danger";
+/// Extra page: export and import of the settings as a file.
+pub const BACKUP: &str = "backup";
 
 /// Sections whose output can be sent to Discord as a test.
 const TESTABLE: &[&str] = &[
     "welcome",
     "rules",
+    "verification",
     "tickets",
     "levels",
     "logs",
@@ -64,7 +69,7 @@ async fn page_data(
     guild_id: &str,
     module: &str,
 ) -> Result<(BotView, GuildContext, GuildConfig), AppError> {
-    let known = module == DANGER || MODULES.iter().any(|(id, _)| *id == module);
+    let known = module == DANGER || module == BACKUP || MODULES.iter().any(|(id, _)| *id == module);
     if !dc_core::is_snowflake(guild_id) || !known {
         return Err(AppError::NotFound);
     }
@@ -227,6 +232,12 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.rules.channel = optional(form.channel);
             config.rules.title = form.title;
             config.rules.text = form.text;
+        }
+        "verification" => {
+            config.rules.verify_enabled = Some(enabled);
+            config.rules.verify_channel = optional(form.channel);
+            config.rules.verify_title = form.title;
+            config.rules.verify_text = form.text;
             config.rules.verification = form.verification;
             config.rules.verified_role = optional(form.role);
             config.rules.remove_role = optional(form.remove_role);
@@ -343,7 +354,7 @@ pub async fn save(
     Form(form): Form<GuildForm>,
 ) -> Page {
     session.check_csrf(&form.csrf)?;
-    if module == DANGER {
+    if module == DANGER || module == BACKUP {
         return Err(AppError::NotFound);
     }
     let (bot, _, mut config) = page_data(&state, &session, &slug, &guild_id, &module).await?;
@@ -381,6 +392,169 @@ pub async fn test(
     );
     state.notices.put(session.key(), answer);
     let to = format!("/bots/{}/servers/{guild_id}/{module}", bot.def.slug);
+    Ok(Redirect::to(&to).into_response())
+}
+
+/// Marks an exported file, so a wrong file is recognized on import.
+const EXPORT_FORMAT: &str = "dc.enderr.win/server-settings";
+/// Largest settings file accepted.
+const MAX_IMPORT: usize = 512 * 1024;
+
+/// GET .../export — every setting of the server as a JSON file.
+pub async fn export(
+    State(state): State<AppState>,
+    session: Session,
+    Path((slug, guild_id)): Path<(String, String)>,
+) -> Page {
+    let (bot, context, config) = page_data(&state, &session, &slug, &guild_id, BACKUP).await?;
+    let file = json!({
+        "format": EXPORT_FORMAT,
+        "version": 1,
+        "bot": bot.def.slug,
+        "server": { "id": guild_id, "name": context.guild.name },
+        "exported_at": dc_core::now(),
+        "settings": config,
+    });
+    let body = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
+    let name = format!("{}-{guild_id}-settings.json", bot.def.slug);
+    tracing::info!(user = %session.user.id, bot = %bot.def.slug, guild = %guild_id, "settings exported");
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".to_owned(),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        body + "\n",
+    )
+        .into_response())
+}
+
+/// The settings inside an imported file: an exported file, or the bare
+/// settings object. Only the sections present replace the current ones.
+fn merge_import(current: &GuildConfig, raw: &str) -> Result<(GuildConfig, Vec<String>), String> {
+    let parsed: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
+        .map_err(|error| format!("This is not a valid JSON file ({error})."))?;
+    let settings = match parsed.get("format") {
+        Some(format) if format != EXPORT_FORMAT => {
+            return Err("This file is not a server settings file of this panel.".into());
+        }
+        Some(_) => parsed.get("settings").cloned().unwrap_or(Value::Null),
+        None => parsed,
+    };
+    let Value::Object(sections) = settings else {
+        return Err("The file has no settings in it.".into());
+    };
+    let mut merged = serde_json::to_value(current).map_err(|error| error.to_string())?;
+    let mut imported = Vec::new();
+    for (key, value) in sections {
+        // Unknown keys are ignored rather than refused: newer files still load.
+        if merged.get(&key).is_some() && value.is_object() {
+            merged[&key] = value;
+            imported.push(key);
+        }
+    }
+    if imported.is_empty() {
+        return Err("The file has no known section (welcome, rules, tickets…).".into());
+    }
+    let mut config: GuildConfig = serde_json::from_value(merged)
+        .map_err(|error| format!("The file has a value of the wrong type ({error})."))?;
+    config.sanitize();
+    imported.sort();
+    Ok((config, imported))
+}
+
+/// Channel and role ids of the settings that do not exist on the server
+/// (member ids are not checked).
+fn unknown_ids(config: &GuildConfig, context: &GuildContext) -> usize {
+    fn walk(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::String(text) if dc_core::is_snowflake(text) => out.push(text.clone()),
+            Value::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            Value::Object(map) => map.values().for_each(|item| walk(item, out)),
+            _ => {}
+        }
+    }
+    let mut value = serde_json::to_value(config).unwrap_or_default();
+    value["admins"]["users"] = Value::Null;
+    let mut ids = Vec::new();
+    walk(&value, &mut ids);
+    ids.sort();
+    ids.dedup();
+    ids.iter()
+        .filter(|id| {
+            **id != context.guild.id
+                && !context.channels.iter().any(|c| &c.id == *id)
+                && !context.roles.iter().any(|r| &r.id == *id)
+        })
+        .count()
+}
+
+/// POST .../import — a settings file, uploaded or pasted.
+pub async fn import(
+    State(state): State<AppState>,
+    session: Session,
+    Path((slug, guild_id)): Path<(String, String)>,
+    mut form: Multipart,
+) -> Page {
+    let unreadable =
+        || AppError::BadRequest("The file could not be read. It must be 512 KB at most.");
+    let (mut csrf, mut file, mut pasted) = (String::new(), String::new(), String::new());
+    while let Some(field) = form.next_field().await.map_err(|_| unreadable())? {
+        let name = field.name().unwrap_or("").to_owned();
+        if !matches!(name.as_str(), "csrf" | "file" | "json") {
+            continue;
+        }
+        let bytes = field.bytes().await.map_err(|_| unreadable())?;
+        if bytes.len() > MAX_IMPORT {
+            return Err(unreadable());
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        match name.as_str() {
+            "csrf" => csrf = text,
+            "file" => file = text,
+            _ => pasted = text,
+        }
+    }
+    session.check_csrf(&csrf)?;
+    let (bot, context, current) = page_data(&state, &session, &slug, &guild_id, BACKUP).await?;
+    let raw = if file.trim().is_empty() { pasted } else { file };
+    let answer = if raw.trim().is_empty() {
+        Answer {
+            ok: false,
+            message: "Choose a file or paste the settings first.".into(),
+        }
+    } else {
+        match merge_import(&current, &raw) {
+            Ok((mut config, sections)) => {
+                config.save(&bot.def.dir, &guild_id)?;
+                tracing::warn!(
+                    user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
+                    sections = %sections.join(","), "settings imported"
+                );
+                let unknown = unknown_ids(&config, &context);
+                let mut message = format!(
+                    "Settings imported ({} section(s): {}).",
+                    sections.len(),
+                    sections.join(", ")
+                );
+                if unknown > 0 {
+                    message.push_str(&format!(
+                        " {unknown} channel or role id(s) do not exist on this server: check the sections."
+                    ));
+                }
+                Answer { ok: true, message }
+            }
+            Err(message) => Answer { ok: false, message },
+        }
+    };
+    state.notices.put(session.key(), answer);
+    let to = format!("/bots/{}/servers/{guild_id}/{BACKUP}", bot.def.slug);
     Ok(Redirect::to(&to).into_response())
 }
 
@@ -550,10 +724,38 @@ mod tests {
     }
 
     #[test]
+    fn import_merges_sections() {
+        let mut current = GuildConfig::default();
+        current.logs.enabled = true;
+        let exported = json!({
+            "format": EXPORT_FORMAT,
+            "settings": { "twitch": { "enabled": true, "logins": ["JunkoCry"] }, "nonsense": { "x": 1 } }
+        })
+        .to_string();
+        let (config, sections) = merge_import(&current, &exported).unwrap();
+        assert_eq!(sections, vec!["twitch"]);
+        assert!(config.twitch.enabled && config.logs.enabled);
+        assert_eq!(config.twitch.logins, vec!["junkocry"]);
+
+        let bare = r#"{"anti_scam":{"invites":true}}"#;
+        assert!(merge_import(&current, bare).unwrap().0.anti_scam.invites);
+        assert!(merge_import(&current, "nope").is_err());
+        assert!(merge_import(&current, r#"{"format":"other","settings":{}}"#).is_err());
+        assert!(merge_import(&current, r#"{"twitch":{"enabled":"yes"}}"#).is_err());
+        assert!(merge_import(&current, r#"{"x":{}}"#).is_err());
+
+        let shipped = include_str!("../../../bots/scanline/import/scanline-settings.json");
+        let (config, sections) = merge_import(&GuildConfig::default(), shipped).unwrap();
+        assert!(sections.len() >= 8);
+        assert!(config.anti_scam.insider && config.role_panel.buttons.len() == 5);
+        assert!(config.rules.verifying() && config.rules.verify_channel.is_none());
+    }
+
+    #[test]
     fn rules_form() {
         let other = "175928847299117065";
         let config = saved(
-            "rules",
+            "verification",
             GuildForm {
                 enabled: Some("on".into()),
                 verification: "activity".into(),

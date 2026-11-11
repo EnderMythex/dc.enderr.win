@@ -49,8 +49,9 @@ async fn handle(app: &App, request: &Request) -> Result<String, String> {
             module, user_id, ..
         } => test(app, guild_id, module, user_id).await,
         Request::Verify { user_id, .. } => {
-            let mode = app.config(guild_id).rules.verification.clone();
-            if mode != "activity" && mode != "web" {
+            let rules = app.config(guild_id).rules.clone();
+            let mode = rules.verification.as_str();
+            if !rules.verifying() || (mode != "activity" && mode != "web") {
                 return Err("This server no longer uses this verification.".into());
             }
             match verify::grant_roles(app, guild_id, user_id).await {
@@ -159,9 +160,20 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
                 Ok(format!("Reminder sent to {}.", posted.join(" and ")))
             };
         }
-        "rules" | "tickets" | "roles" => {
+        "rules" | "tickets" | "roles" | "verification" => {
             let (enabled, channel) = match module {
                 "rules" => (config.rules.enabled, config.rules.channel.clone()),
+                "verification" => {
+                    let Some(channel) = config.rules.verify_message_channel() else {
+                        return Err(if config.rules.verify_under_rules() {
+                            "The Verify button is under the rules: post the rules panel again from the Rules section."
+                                .into()
+                        } else {
+                            "Turn the verification on, choose its channel and save first.".into()
+                        });
+                    };
+                    (true, Some(channel.to_owned()))
+                }
                 "roles" => (
                     config.role_panel.enabled && !config.role_panel.buttons.is_empty(),
                     config.role_panel.channel.clone(),

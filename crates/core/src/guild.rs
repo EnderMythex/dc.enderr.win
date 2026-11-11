@@ -256,14 +256,26 @@ impl Default for Welcome {
     }
 }
 
+/// The rules message and the verification. The Verify button goes under the
+/// rules when both share a channel (or no verification channel is chosen),
+/// and in its own message in the verification channel otherwise.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rules {
+    /// The rules message is posted.
     pub enabled: bool,
     pub channel: Option<String>,
     pub title: String,
     pub text: String,
-    /// One of [`VERIFY_MODES`].
+    /// Verification is on. `None` only in files written before rules and
+    /// verification were split; `sanitize` then derives it.
+    #[serde(default)]
+    pub verify_enabled: Option<bool>,
+    /// Channel of the verification message; `None`: under the rules.
+    pub verify_channel: Option<String>,
+    pub verify_title: String,
+    pub verify_text: String,
+    /// One of [`VERIFY_MODES`] (`none` is stored as verification off).
     pub verification: String,
     pub verified_role: Option<String>,
     /// Role taken away once verified, e.g. an "Unverified" role.
@@ -281,11 +293,37 @@ impl Default for Rules {
             text: "1. Be respectful to everyone.\n2. No spam or self-promotion.\n\
                    3. Follow Discord's Terms of Service."
                 .into(),
+            verify_enabled: Some(false),
+            verify_channel: None,
+            verify_title: "Verification".into(),
+            verify_text: "Click the button below to get access to the server.".into(),
             verification: "button".into(),
             verified_role: None,
             remove_role: None,
             captcha_style: "text".into(),
         }
+    }
+}
+
+impl Rules {
+    /// Is the verification on?
+    pub fn verifying(&self) -> bool {
+        self.verify_enabled == Some(true)
+    }
+
+    /// Does the Verify button go under the rules message?
+    pub fn verify_under_rules(&self) -> bool {
+        self.verifying()
+            && self.enabled
+            && self.channel.is_some()
+            && (self.verify_channel.is_none() || self.verify_channel == self.channel)
+    }
+
+    /// Channel of a separate verification message, if there is one.
+    pub fn verify_message_channel(&self) -> Option<&str> {
+        self.verify_channel
+            .as_deref()
+            .filter(|_| self.verifying() && !self.verify_under_rules())
     }
 }
 
@@ -452,6 +490,26 @@ impl GuildConfig {
         clean_text(&mut self.rules.title, MAX_TITLE, &defaults.rules.title);
         clean_text(&mut self.rules.text, MAX_TEXT, &defaults.rules.text);
         clean_choice(&mut self.rules.verification, VERIFY_MODES, "button");
+        let rules = &mut self.rules;
+        // Older files: the verification was on with the rules panel.
+        let on = rules
+            .verify_enabled
+            .unwrap_or(rules.enabled && rules.verification != "none");
+        rules.verify_enabled = Some(on && rules.verification != "none");
+        if rules.verification == "none" {
+            rules.verification = "button".into();
+        }
+        clean_id(&mut rules.verify_channel);
+        clean_text(
+            &mut rules.verify_title,
+            MAX_TITLE,
+            &defaults.rules.verify_title,
+        );
+        clean_text(
+            &mut rules.verify_text,
+            MAX_TEXT,
+            &defaults.rules.verify_text,
+        );
         clean_choice(&mut self.rules.captcha_style, CAPTCHA_STYLES, "text");
 
         clean_id(&mut self.tickets.panel_channel);
@@ -653,6 +711,7 @@ mod tests {
         assert_eq!(c.admins.users, vec!["175928847299117063"]);
         assert_eq!(c.welcome.channel, None);
         assert_eq!(c.rules.verification, "button");
+        assert!(!c.rules.verifying());
         assert_eq!(c.rules.title, "Server rules");
         assert_eq!(c.lock_url.allowed_domains, vec!["youtube.com"]);
         assert_eq!((c.xp.min_xp, c.xp.max_xp), (300, 300));
@@ -662,6 +721,43 @@ mod tests {
         assert_eq!(c.welcome.ping_channels.len(), MAX_PING_CHANNELS);
         assert!(c.rules.verified_role.is_some());
         assert_eq!(c.rules.remove_role, None);
+    }
+
+    #[test]
+    fn rules_and_verification_split() {
+        let channel = |n: u8| Some(format!("17592884729911706{n}"));
+        // Before the split: verification followed the rules panel.
+        let old =
+            r#"{"rules":{"enabled":true,"channel":"175928847299117061","verification":"captcha"}}"#;
+        let mut c: GuildConfig = serde_json::from_str(old).unwrap();
+        c.sanitize();
+        assert!(c.rules.verifying() && c.rules.verify_under_rules());
+        assert_eq!(c.rules.verify_message_channel(), None);
+        let old = r#"{"rules":{"enabled":true,"verification":"none"}}"#;
+        let mut c: GuildConfig = serde_json::from_str(old).unwrap();
+        c.sanitize();
+        assert!(!c.rules.verifying());
+        assert_eq!(c.rules.verification, "button");
+
+        let mut r = Rules {
+            channel: channel(1),
+            verify_enabled: Some(true),
+            verify_channel: channel(2),
+            enabled: true,
+            ..Rules::default()
+        };
+        assert!(!r.verify_under_rules());
+        assert_eq!(r.verify_message_channel(), channel(2).as_deref());
+        // Rules off: verification alone.
+        r.enabled = false;
+        assert_eq!(r.verify_message_channel(), channel(2).as_deref());
+        // Same channel: one message.
+        r.enabled = true;
+        r.verify_channel = channel(1);
+        assert!(r.verify_under_rules());
+        assert_eq!(r.verify_message_channel(), None);
+        r.verify_enabled = Some(false);
+        assert!(!r.verify_under_rules());
     }
 
     #[test]
