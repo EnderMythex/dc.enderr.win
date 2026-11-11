@@ -225,6 +225,11 @@ fn module_rows(names: &Names, config: &GuildConfig, module: &str) -> Vec<Row> {
                     Shown::Switch(w.image),
                 ),
                 Row::new("Roles on arrival", "", names.roles(&w.auto_roles)),
+                Row::new(
+                    "Join mentions",
+                    &format!("Deleted after {} s", w.ping_seconds),
+                    count(w.ping_channels.len(), "channel", "channels"),
+                ),
             ]
         }
         "rules" => {
@@ -435,6 +440,16 @@ fn module_controls(config: &GuildConfig, module: &str) -> Vec<Value> {
                 "Roles given on arrival",
                 &w.auto_roles,
                 10,
+            ));
+            out.extend(labeled(
+                "Mention new members here (deleted after a few seconds)",
+                ui::entity_select(
+                    "settings:channels:ghost",
+                    "No channel",
+                    Pick::Channels(TEXT_CHANNELS),
+                    &w.ping_channels,
+                    dc_core::guild::MAX_PING_CHANNELS,
+                ),
             ));
         }
         "rules" => {
@@ -748,7 +763,7 @@ async fn after_change(ctx: &Ctx, module: &str) {
 /// The module a control belongs to.
 fn module_of(target: &str) -> &'static str {
     match target {
-        "welcome" | "welcome_image" => "welcome",
+        "welcome" | "welcome_image" | "ghost" => "welcome",
         "rules" | "verified" | "unverified" | "verification" | "captcha_style" => "rules",
         "tickets" | "ticket_category" | "staff" | "transcripts" => "tickets",
         "levels" | "announce" => "levels",
@@ -785,6 +800,7 @@ fn apply(config: &mut GuildConfig, kind: &str, target: &str, values: &[String]) 
         }
 
         ("roles", "welcome") => config.welcome.auto_roles = values.to_vec(),
+        ("channels", "ghost") => config.welcome.ping_channels = values.to_vec(),
         ("roles", "verified") => config.rules.verified_role = first,
         ("roles", "unverified") => config.rules.remove_role = first,
         ("roles", "staff") => config.tickets.staff_roles = values.to_vec(),
@@ -947,6 +963,8 @@ mod tests {
         assert!(config.logs.members && !config.logs.message_delete);
         let config = applied("users", "admins", &[ID, "x"]).unwrap();
         assert_eq!(config.admins.users, vec![ID]);
+        let config = applied("channels", "ghost", &[ID]).unwrap();
+        assert_eq!(config.welcome.ping_channels, vec![ID]);
         assert!(applied("toggle", "nothing", &[]).is_none());
     }
 

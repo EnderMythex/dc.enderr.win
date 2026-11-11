@@ -115,6 +115,7 @@ pub struct GuildForm {
     role: String,
     remove_role: String,
     captcha_style: String,
+    ping_seconds: String,
     title: String,
     text: String,
     image: Option<String>,
@@ -174,6 +175,8 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.welcome.message = form.text;
             config.welcome.image = form.image.is_some();
             config.welcome.auto_roles = form.roles;
+            config.welcome.ping_channels = form.channels;
+            config.welcome.ping_seconds = number(&form.ping_seconds, 3);
         }
         "rules" => {
             config.rules.enabled = enabled;
@@ -467,6 +470,22 @@ mod tests {
         assert_eq!(config.rules.verified_role.as_deref(), Some(ROLE));
         assert_eq!(config.rules.remove_role.as_deref(), Some(other));
         assert_eq!(config.rules.captcha_style, "slide");
+    }
+
+    #[test]
+    fn join_mentions() {
+        let config = saved(
+            "welcome",
+            GuildForm {
+                channels: vec![CHANNEL.into(), ROLE.into(), "x".into()],
+                ping_seconds: "999".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.welcome.ping_channels, vec![ROLE, CHANNEL]);
+        assert_eq!(config.welcome.ping_seconds, 60);
+        // Works even with the welcome message off.
+        assert!(!config.welcome.enabled);
     }
 
     #[test]

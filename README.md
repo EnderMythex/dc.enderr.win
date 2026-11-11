@@ -49,7 +49,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Sanctions | `/mute` `/unmute` `/kick` `/ban` (with confirmation) `/unban` | — |
 | Roles | `/role add\|remove`, `/role add-all\|remove-all` (every member, with confirmation) | Welcome: roles given on arrival |
 | Levels | `/rank` (image card) `/leaderboard` (image) `/xp add\|remove\|reset` | Levels: XP rates, announcements, role rewards |
-| Welcome | `/settings welcome`, `/settings preview` | Welcome: channel, message, image |
+| Welcome | `/settings welcome`, `/settings preview` | Welcome: channel, message, image; mentions of new members in chosen channels, deleted after a few seconds |
 | Rules + verification | `/settings rules` | Rules: text, verification (button, captcha image, website link, Activity), captcha style (text or slide), verified role, role removed once verified |
 | Tickets | `/settings tickets` | Tickets: panel, category, staff, topics, transcripts |
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |

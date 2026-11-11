@@ -70,7 +70,15 @@ pub struct Welcome {
     pub message: String,
     pub image: bool,
     pub auto_roles: Vec<String>,
+    /// Channels where a new member is mentioned, the mention being deleted
+    /// after [`Welcome::ping_seconds`]: it draws their attention to those
+    /// channels. Empty: off. Works even when the welcome message is off.
+    pub ping_channels: Vec<String>,
+    pub ping_seconds: u32,
 }
+
+/// Most channels a new member can be mentioned in.
+pub const MAX_PING_CHANNELS: usize = 10;
 
 impl Default for Welcome {
     fn default() -> Self {
@@ -80,6 +88,8 @@ impl Default for Welcome {
             message: "Welcome {user} to **{server}**! You are member #{count}.".into(),
             image: true,
             auto_roles: Vec::new(),
+            ping_channels: Vec::new(),
+            ping_seconds: 3,
         }
     }
 }
@@ -266,6 +276,9 @@ impl GuildConfig {
             &defaults.welcome.message,
         );
         clean_ids(&mut self.welcome.auto_roles);
+        clean_ids(&mut self.welcome.ping_channels);
+        self.welcome.ping_channels.truncate(MAX_PING_CHANNELS);
+        self.welcome.ping_seconds = self.welcome.ping_seconds.clamp(1, 60);
 
         clean_id(&mut self.rules.channel);
         clean_id(&mut self.rules.verified_role);
@@ -407,6 +420,8 @@ mod tests {
             },
         ];
         c.tickets.max_open = 99;
+        c.welcome.ping_seconds = 0;
+        c.welcome.ping_channels = (0..20).map(|i| format!("1759288472991170{i:02}")).collect();
         c.rules.verified_role = Some("175928847299117063".into());
         c.rules.remove_role = Some("175928847299117063".into());
         c.sanitize();
@@ -419,6 +434,8 @@ mod tests {
         assert_eq!((c.xp.min_xp, c.xp.max_xp), (300, 300));
         assert_eq!(c.xp.rewards.len(), 1);
         assert_eq!(c.tickets.max_open, 5);
+        assert_eq!(c.welcome.ping_seconds, 1);
+        assert_eq!(c.welcome.ping_channels.len(), MAX_PING_CHANNELS);
         assert!(c.rules.verified_role.is_some());
         assert_eq!(c.rules.remove_role, None);
     }

@@ -914,6 +914,8 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
                 (textarea("text", "Message", "Placeholders: {user} mentions the member, {name} their name, {server} the server name, {count} the member number.", &welcome.message, 4, 1800))
                 (switch("image", "Attach the welcome image", "A card with the member's avatar, name and member number.", welcome.image))
                 (checks("roles", "Roles given on arrival", "The bot's role must be above these roles.", &role_items, &welcome.auto_roles))
+                (checks("channels", "Mention new members in these channels", "Optional, up to 10. The bot mentions each new member in every channel ticked here, then deletes the mention after a few seconds: the channels light up for them without leaving messages behind. Works even if the welcome message is off.", &channel_items, &welcome.ping_channels))
+                (number_input("ping_seconds", "Delete the mentions after (seconds)", "", welcome.ping_seconds, 1, 60))
             }
         }
         "rules" => {

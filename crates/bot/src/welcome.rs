@@ -68,14 +68,54 @@ pub async fn message(
     msg.ping(user_id)
 }
 
+/// Mentions a new member in each chosen channel, then deletes the mentions:
+/// the channels light up for them without leaving messages behind.
+async fn ping_member(app: &App, guild_id: &str, channels: &[String], user_id: &str, seconds: u32) {
+    let mut ping = Msg::default().ping(user_id);
+    ping.components = vec![ui::text(format!("<@{user_id}>"))];
+    let sends = channels.iter().map(|channel| async {
+        match app.api.send_message(channel, &ping).await {
+            Ok(sent) => Some((channel.clone(), str_of(&sent, "id").to_owned())),
+            Err(error) => {
+                tracing::warn!(guild = guild_id, %error, "join ping failed");
+                None
+            }
+        }
+    });
+    let sent: Vec<(String, String)> = futures_util::future::join_all(sends)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+    tokio::time::sleep(std::time::Duration::from_secs(seconds.into())).await;
+    for (channel, message) in sent {
+        if let Err(error) = app.api.delete_message(&channel, &message).await {
+            tracing::warn!(guild = guild_id, %error, "deleting a join ping failed");
+        }
+    }
+}
+
 pub async fn on_member_add(app: &App, guild_id: &str, member: &Value) {
     let config = app.config(guild_id);
     let welcome = &config.welcome;
     let user = &member["user"];
-    if !welcome.enabled || user["bot"] == true {
+    if user["bot"] == true {
         return;
     }
     let user_id = str_of(user, "id");
+    if !welcome.ping_channels.is_empty() {
+        ping_member(
+            app,
+            guild_id,
+            &welcome.ping_channels,
+            user_id,
+            welcome.ping_seconds,
+        )
+        .await;
+    }
+    if !welcome.enabled {
+        return;
+    }
     for role in &welcome.auto_roles {
         if let Err(error) = app
             .api
