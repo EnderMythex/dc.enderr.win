@@ -82,6 +82,11 @@ impl Api {
         })
     }
 
+    /// The bot token (it also signs the verification links).
+    pub fn token(&self) -> &str {
+        self.auth.trim_start_matches("Bot ")
+    }
+
     pub async fn get(&self, path: &str) -> ApiResult {
         self.send(Method::GET, path, None, None, &[]).await
     }

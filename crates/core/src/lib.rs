@@ -8,6 +8,7 @@ pub mod registry;
 pub mod render;
 pub mod requests;
 pub mod settings;
+pub mod verify_link;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

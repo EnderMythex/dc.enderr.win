@@ -1,0 +1,9 @@
+# ElyZium Bot — moderation, levels, welcome, verification, tickets, logs,
+# giveaways and announcements (same features as Sang).
+
+name = "ElyZium Bot"
+description = "Moderation, levels, welcome, verification, tickets, logs, giveaways and announcements."
+
+# Discord user ids allowed to manage this bot from the panel. Add the
+# client's id here, or in the OWNERS_ELYZIUM variable on Coolify.
+owners = []

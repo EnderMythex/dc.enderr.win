@@ -191,6 +191,7 @@ pub async fn bot_servers(
     session: Session,
     Path(slug): Path<String>,
 ) -> Page {
+    let notice = state.notices.take(session.key());
     let def = owned_bot(&state, &session, &slug).await?;
     let token = def.token();
     let bot = BotView::load(&state, def).await;
@@ -209,7 +210,8 @@ pub async fn bot_servers(
                 }
             }),
     };
-    Ok(views::bot_servers(&session, &bot, guilds).into_response())
+    let flash = notice.as_ref().map(|answer| answer.message.as_str());
+    Ok(views::bot_servers(&session, &bot, guilds, flash).into_response())
 }
 
 pub async fn bot_logs(

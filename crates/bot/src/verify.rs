@@ -70,8 +70,32 @@ pub async fn start(ctx: &Ctx) {
             }
             image_captcha(ctx).await;
         }
+        "web" => match web_link(ctx) {
+            Some(url) => {
+                let text = "Open the link below and solve the captcha. The link only works \
+                            for you and expires in 10 minutes.";
+                let open = ui::row(vec![ui::link_button("Open the verification page", &url)]);
+                let msg = Msg::banner(dc_core::cards::Tone::Info, "Verification", text, vec![open]);
+                ctx.reply(msg.ephemeral()).await;
+            }
+            None => image_captcha(ctx).await,
+        },
         _ => grant(ctx).await,
     }
+}
+
+/// Personal link to the verification page of the panel, signed for this
+/// member and server. `None` when the panel's address is unknown.
+fn web_link(ctx: &Ctx) -> Option<String> {
+    let origin = ctx.app.panel_origin()?;
+    let value = dc_core::verify_link::sign(
+        ctx.app.api.token(),
+        &ctx.app.slug,
+        &ctx.guild_id,
+        ctx.user_id(),
+        dc_core::now(),
+    );
+    Some(format!("{origin}/verify/{}?v={value}", ctx.app.slug))
 }
 
 /// Sends the captcha image with a button that opens the answer form.

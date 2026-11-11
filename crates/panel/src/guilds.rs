@@ -114,6 +114,7 @@ pub struct GuildForm {
     category: String,
     role: String,
     remove_role: String,
+    captcha_style: String,
     title: String,
     text: String,
     image: Option<String>,
@@ -182,6 +183,7 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.rules.verification = form.verification;
             config.rules.verified_role = optional(form.role);
             config.rules.remove_role = optional(form.remove_role);
+            config.rules.captcha_style = form.captcha_style;
         }
         "tickets" => {
             config.tickets.enabled = enabled;
@@ -338,6 +340,34 @@ pub async fn reset(
     Ok(Redirect::to(&to).into_response())
 }
 
+/// POST .../leave — the danger zone: the bot leaves the server. Its
+/// settings for the server are kept, in case it is invited again.
+pub async fn leave(
+    State(state): State<AppState>,
+    session: Session,
+    Path((slug, guild_id)): Path<(String, String)>,
+    Form(form): Form<ResetForm>,
+) -> Page {
+    session.check_csrf(&form.csrf)?;
+    if form.confirm.is_none() {
+        return Err(AppError::BadRequest(
+            "Tick the confirmation box to remove the bot.",
+        ));
+    }
+    let (bot, context, _) = page_data(&state, &session, &slug, &guild_id, DANGER).await?;
+    let token = bot.def.token().ok_or(AppError::NotFound)?;
+    state.discord.leave_guild(&token, &guild_id).await?;
+    tracing::warn!(
+        user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
+        "bot removed from a server"
+    );
+    let message = format!("{} has left {}.", bot.def.name, context.guild.name);
+    state
+        .notices
+        .put(session.key(), Answer { ok: true, message });
+    Ok(Redirect::to(&format!("/bots/{}/servers", bot.def.slug)).into_response())
+}
+
 /// GET .../preview/{image} — the images of the bot, drawn with the logged-in
 /// user's own name and avatar.
 pub async fn preview(
@@ -429,12 +459,14 @@ mod tests {
                 verification: "activity".into(),
                 role: ROLE.into(),
                 remove_role: other.into(),
+                captcha_style: "slide".into(),
                 ..Default::default()
             },
         );
         assert_eq!(config.rules.verification, "activity");
         assert_eq!(config.rules.verified_role.as_deref(), Some(ROLE));
         assert_eq!(config.rules.remove_role.as_deref(), Some(other));
+        assert_eq!(config.rules.captcha_style, "slide");
     }
 
     #[test]

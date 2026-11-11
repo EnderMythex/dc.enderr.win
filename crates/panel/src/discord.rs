@@ -258,6 +258,24 @@ impl Discord {
         Some(response.bytes().await.ok()?.to_vec())
     }
 
+    /// A Discord account, looked up with the bot's token.
+    pub async fn user(&self, token: &str, user_id: &str) -> Result<DiscordUser, DiscordError> {
+        self.get(&format!("/users/{user_id}"), &format!("Bot {token}"))
+            .await
+    }
+
+    /// Makes the bot leave a server.
+    pub async fn leave_guild(&self, token: &str, guild_id: &str) -> Result<(), DiscordError> {
+        let response = self
+            .http
+            .delete(format!("{}/users/@me/guilds/{guild_id}", self.api))
+            .header(reqwest::header::AUTHORIZATION, format!("Bot {token}"))
+            .send()
+            .await?;
+        check(response)?;
+        Ok(())
+    }
+
     /// Servers the bot is in (200 max).
     pub async fn bot_guilds(&self, token: &str) -> Result<Vec<Guild>, DiscordError> {
         self.get(

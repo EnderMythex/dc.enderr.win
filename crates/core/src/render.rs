@@ -261,6 +261,103 @@ pub fn captcha(code: &str) -> String {
     )
 }
 
+/// Size of the slide captcha's background.
+pub const SLIDE_WIDTH: u32 = 460;
+pub const SLIDE_HEIGHT: u32 = 220;
+/// Size of the image of the puzzle piece (a 56 px square with two knobs).
+pub const PIECE_SIZE: u32 = 66;
+/// The knob on top of the piece rises this far above its square.
+pub const PIECE_RISE: u32 = 10;
+/// How far from the right place, in pixels, an answer may be.
+pub const SLIDE_TOLERANCE: u32 = 6;
+
+/// A slide captcha: a background with a hole, and the piece that fills it.
+/// The member slides the piece horizontally; the answer is `x`.
+pub struct SlidePuzzle {
+    pub x: u32,
+    pub y: u32,
+    pub background: String,
+    pub piece: String,
+}
+
+/// Outline of the piece with the top-left corner of its square at (x, y).
+fn piece_path(x: u32, y: u32) -> String {
+    format!("M{x} {y} h18 a10 10 0 0 1 20 0 h18 v18 a10 10 0 0 1 0 20 v18 h-56 z")
+}
+
+/// Random shapes, so the hole can only be matched by looking.
+fn slide_scene() -> String {
+    let (w, h) = (SLIDE_WIDTH, SLIDE_HEIGHT);
+    let between = |min: u32, max: u32| random_range(min, max);
+    let gray = || {
+        let level = between(0x30, 0xb0);
+        format!("#{level:02x}{level:02x}{level:02x}")
+    };
+    let mut scene = format!(
+        r##"<defs><linearGradient id="sky" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#151515"/><stop offset="1" stop-color="#050505"/></linearGradient></defs><rect width="{w}" height="{h}" fill="url(#sky)"/>"##
+    );
+    for _ in 0..16 {
+        scene.push_str(&format!(
+            r##"<circle cx="{}" cy="{}" r="{}" fill="{}" opacity="0.{}"/>"##,
+            between(0, w),
+            between(0, h),
+            between(12, 58),
+            gray(),
+            between(35, 85)
+        ));
+    }
+    for _ in 0..8 {
+        let (x, y) = (between(0, w), between(0, h));
+        scene.push_str(&format!(
+            r##"<path d="M{x} {y} l{} {} l{} {} z" fill="{}" opacity="0.{}"/>"##,
+            between(20, 90),
+            between(0, 70),
+            between(0, 60),
+            between(30, 90),
+            gray(),
+            between(40, 90)
+        ));
+    }
+    for _ in 0..10 {
+        scene.push_str(&format!(
+            r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" opacity="0.7"/>"##,
+            between(0, w),
+            between(0, h),
+            between(0, w),
+            between(0, h),
+            gray(),
+            between(1, 4)
+        ));
+    }
+    scene
+}
+
+pub fn slide_puzzle() -> SlidePuzzle {
+    let (w, h) = (SLIDE_WIDTH, SLIDE_HEIGHT);
+    let x = random_range(140, w - PIECE_SIZE - 14);
+    let y = random_range(PIECE_RISE + 14, h - 56 - 14);
+    let scene = slide_scene();
+    let outline = piece_path(x, y);
+    let background = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{scene}<path d="{outline}" fill="#000000" fill-opacity="0.62" stroke="#ffffff" stroke-opacity="0.75" stroke-width="2"/></svg>"##
+    );
+    let piece = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{PIECE_SIZE}" height="{PIECE_SIZE}" viewBox="{x} {} {PIECE_SIZE} {PIECE_SIZE}"><defs><clipPath id="piece"><path d="{outline}"/></clipPath></defs><g clip-path="url(#piece)">{scene}</g><path d="{outline}" fill="none" stroke="#ffffff" stroke-width="2.5"/></svg>"##,
+        y - PIECE_RISE
+    );
+    SlidePuzzle {
+        x,
+        y,
+        background,
+        piece,
+    }
+}
+
+/// Is a slide answer close enough to the hole?
+pub fn slide_matches(answer: u32, x: u32) -> bool {
+    answer.abs_diff(x) <= SLIDE_TOLERANCE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +421,7 @@ mod tests {
             ),
             ("rank.png", rank(&card)),
             ("captcha.png", captcha(&captcha_code())),
+            ("slide-background.png", slide_puzzle().background),
         ];
         for (name, svg) in images {
             std::fs::write(dir.join(name), png(&svg).unwrap()).unwrap();
@@ -337,6 +435,21 @@ mod tests {
         // Emoji cannot be drawn with the font: dropped rather than shown as boxes.
         assert_eq!(fit("🔥 Ender  🔥 Mythex", 30), "Ender Mythex");
         assert_eq!(fit("Mélodie Привет", 30), "Mélodie Привет");
+    }
+
+    #[test]
+    fn slide_puzzles() {
+        for _ in 0..20 {
+            let puzzle = slide_puzzle();
+            assert!(puzzle.x + PIECE_SIZE <= SLIDE_WIDTH);
+            assert!(puzzle.y >= PIECE_RISE && puzzle.y + 56 <= SLIDE_HEIGHT);
+        }
+        let puzzle = slide_puzzle();
+        assert!(png(&puzzle.background).unwrap().starts_with(PNG_MAGIC));
+        let piece = png(&puzzle.piece).unwrap();
+        assert!(piece.starts_with(PNG_MAGIC));
+        assert!(slide_matches(puzzle.x + 4, puzzle.x));
+        assert!(!slide_matches(puzzle.x + 20, puzzle.x));
     }
 
     #[test]

@@ -49,8 +49,9 @@ async fn handle(app: &App, request: &Request) -> Result<String, String> {
             module, user_id, ..
         } => test(app, guild_id, module, user_id).await,
         Request::Verify { user_id, .. } => {
-            if app.config(guild_id).rules.verification != "activity" {
-                return Err("This server does not use the Activity verification.".into());
+            let mode = app.config(guild_id).rules.verification.clone();
+            if mode != "activity" && mode != "web" {
+                return Err("This server no longer uses this verification.".into());
             }
             match verify::grant_roles(app, guild_id, user_id).await {
                 Ok(()) => Ok("Verified.".into()),

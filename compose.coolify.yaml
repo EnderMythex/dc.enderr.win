@@ -23,6 +23,10 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-https://dc.enderr.win}
       # Staff: ids that see and manage every bot (comma-separated).
       ADMIN_IDS: ${ADMIN_IDS:-}
+      # Publisher shown on the legal pages.
+      LEGAL_NAME: ${LEGAL_NAME:-}
+      LEGAL_ADDRESS: ${LEGAL_ADDRESS:-}
+      LEGAL_EMAIL: ${LEGAL_EMAIL:-}
       BIND_ADDR: 0.0.0.0:8080
       DATABASE_URL: sqlite:///data/panel.db
       BOTS_DIR: /bots
@@ -32,6 +36,9 @@ services:
       DISCORD_TOKEN_SANG: ${DISCORD_TOKEN_SANG:?}
       DISCORD_CLIENT_SECRET_SANG: ${DISCORD_CLIENT_SECRET_SANG:-}
       OWNERS_SANG: ${OWNERS_SANG:-}
+      DISCORD_TOKEN_ELYZIUM: ${DISCORD_TOKEN_ELYZIUM:?}
+      DISCORD_CLIENT_SECRET_ELYZIUM: ${DISCORD_CLIENT_SECRET_ELYZIUM:-}
+      OWNERS_ELYZIUM: ${OWNERS_ELYZIUM:-}
     # Lets the non-root panel user use the Docker socket, to start, stop and
     # read the logs of the bots. Value: `stat -c %g /var/run/docker.sock`.
     group_add:
@@ -61,6 +68,26 @@ services:
     labels:
       # Required: the panel only controls containers carrying this label.
       win.enderr.dc.bot: sang
+    volumes:
+      - bots:/bots
+
+  bot-elyzium:
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    depends_on:
+      - panel
+    environment:
+      BOT_SLUG: elyzium
+      BOT_CONFIG_DIR: /bots/elyzium
+      BOTS_SEED_DIR: /opt/dc/bots
+      DISCORD_TOKEN: ${DISCORD_TOKEN_ELYZIUM:?}
+      DISCORD_CLIENT_SECRET_ELYZIUM: ${DISCORD_CLIENT_SECRET_ELYZIUM:-}
+      OWNERS_ELYZIUM: ${OWNERS_ELYZIUM:-}
+      DASHBOARD_URL: ${PUBLIC_URL:-https://dc.enderr.win}/bots/elyzium
+    labels:
+      win.enderr.dc.bot: elyzium
     volumes:
       - bots:/bots
 

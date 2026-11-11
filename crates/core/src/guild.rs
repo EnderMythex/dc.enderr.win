@@ -15,8 +15,13 @@ use crate::is_snowflake;
 
 pub const DIR_NAME: &str = "guilds";
 
-/// `activity` shows the captcha in a Discord Activity (see the README).
-pub const VERIFY_MODES: &[&str] = &["none", "button", "captcha", "activity"];
+/// `captcha` is an image captcha inside Discord; `activity` shows the
+/// captcha in a Discord Activity and `web` on a page of the panel, reached
+/// with a signed link (see the README).
+pub const VERIFY_MODES: &[&str] = &["none", "button", "captcha", "activity", "web"];
+/// Captcha of the Activity and of the web page: type a code, or slide a
+/// puzzle piece into place.
+pub const CAPTCHA_STYLES: &[&str] = &["text", "slide"];
 pub const ANNOUNCE_MODES: &[&str] = &["off", "same", "channel"];
 
 const MAX_IDS: usize = 50;
@@ -91,6 +96,8 @@ pub struct Rules {
     pub verified_role: Option<String>,
     /// Role taken away once verified, e.g. an "Unverified" role.
     pub remove_role: Option<String>,
+    /// One of [`CAPTCHA_STYLES`], for the `activity` and `web` modes.
+    pub captcha_style: String,
 }
 
 impl Default for Rules {
@@ -105,6 +112,7 @@ impl Default for Rules {
             verification: "button".into(),
             verified_role: None,
             remove_role: None,
+            captcha_style: "text".into(),
         }
     }
 }
@@ -269,6 +277,7 @@ impl GuildConfig {
         clean_text(&mut self.rules.title, MAX_TITLE, &defaults.rules.title);
         clean_text(&mut self.rules.text, MAX_TEXT, &defaults.rules.text);
         clean_choice(&mut self.rules.verification, VERIFY_MODES, "button");
+        clean_choice(&mut self.rules.captcha_style, CAPTCHA_STYLES, "text");
 
         clean_id(&mut self.tickets.panel_channel);
         clean_id(&mut self.tickets.category);

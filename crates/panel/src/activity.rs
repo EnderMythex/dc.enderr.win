@@ -1,13 +1,19 @@
-//! Member verification inside a Discord Activity.
+//! Member verification on a page of the panel, reached two ways:
 //!
-//! The bot's "Verify" button opens the bot application's Activity, whose URL
-//! mapping points at `/activity/<slug>` here. The page proves who the member
-//! is with Discord's OAuth2 (through the Activity's own RPC channel), shows a
-//! captcha, and on success asks the bot to hand out the roles.
+//! - **Activity** (`activity` mode): the bot's Verify button opens the bot
+//!   application's Activity, whose URL mapping points at `/activity/<slug>`.
+//!   The page proves who the member is with Discord's OAuth2, through the
+//!   Activity's own RPC channel.
+//! - **Link** (`web` mode): the Verify button gives the member a link to
+//!   `/verify/<slug>?v=...`, signed by the bot for that member and server
+//!   (see `dc_core::verify_link`).
 //!
-//! These routes are public: they are loaded by Discord's proxy, without the
-//! panel's session cookie. A challenge is bound to the Discord account that
-//! authorized it, and only ever results in "this member passed the captcha".
+//! The page then shows a captcha (a code to type, or a puzzle piece to slide
+//! into place) and, once solved, asks the bot to hand out the roles.
+//!
+//! These routes are public: they hold no panel session. A challenge is bound
+//! to one member of one server, and only ever results in "this member passed
+//! the captcha".
 
 use std::{
     collections::HashMap,
@@ -18,7 +24,7 @@ use std::{
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{StatusCode, header},
+    http::header,
     response::{IntoResponse, Response},
 };
 use dc_core::{
@@ -27,6 +33,7 @@ use dc_core::{
     registry::{self, BotDef},
     render,
     requests::Request,
+    verify_link,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -37,11 +44,64 @@ const LIFETIME: Duration = Duration::from_secs(600);
 const MAX_ATTEMPTS: u32 = 5;
 const MAX_CHALLENGES: usize = 10_000;
 
+enum Puzzle {
+    /// Characters to type, drawn on an image.
+    Text(String),
+    /// A piece to slide to `x`; the images are kept until answered.
+    Slide {
+        x: u32,
+        y: u32,
+        background: String,
+        piece: String,
+    },
+}
+
+impl Puzzle {
+    fn new(style: &str) -> Self {
+        if style == "slide" {
+            let puzzle = render::slide_puzzle();
+            Self::Slide {
+                x: puzzle.x,
+                y: puzzle.y,
+                background: puzzle.background,
+                piece: puzzle.piece,
+            }
+        } else {
+            Self::Text(render::captcha_code())
+        }
+    }
+
+    fn solved_by(&self, answer: &str) -> bool {
+        match self {
+            Self::Text(code) => *code == answer.trim().to_uppercase(),
+            Self::Slide { x, .. } => answer
+                .trim()
+                .parse::<u32>()
+                .is_ok_and(|answer| render::slide_matches(answer, *x)),
+        }
+    }
+
+    /// What the page needs to show it.
+    fn describe(&self) -> Value {
+        match self {
+            Self::Text(_) => json!({ "kind": "text" }),
+            Self::Slide { y, .. } => json!({
+                "kind": "slide",
+                "width": render::SLIDE_WIDTH,
+                "height": render::SLIDE_HEIGHT,
+                "piece": render::PIECE_SIZE,
+                "top": y - render::PIECE_RISE,
+            }),
+        }
+    }
+}
+
 struct Challenge {
     slug: String,
     guild_id: String,
     user_id: String,
-    code: String,
+    style: String,
+    puzzle: Puzzle,
     attempts: u32,
     expires: Instant,
 }
@@ -51,7 +111,7 @@ struct Challenge {
 pub struct Challenges(Arc<Mutex<HashMap<String, Challenge>>>);
 
 impl Challenges {
-    fn create(&self, slug: &str, guild_id: &str, user_id: &str) -> String {
+    fn create(&self, slug: &str, guild_id: &str, user_id: &str, style: &str) -> (String, Value) {
         let mut all = self.0.lock().unwrap();
         all.retain(|_, challenge| challenge.expires > Instant::now());
         // One challenge per member and server, and a hard cap on memory.
@@ -60,18 +120,21 @@ impl Challenges {
             all.clear();
         }
         let token = random_token(24);
+        let puzzle = Puzzle::new(style);
+        let description = puzzle.describe();
         all.insert(
             token.clone(),
             Challenge {
                 slug: slug.to_owned(),
                 guild_id: guild_id.to_owned(),
                 user_id: user_id.to_owned(),
-                code: render::captcha_code(),
+                style: style.to_owned(),
+                puzzle,
                 attempts: 0,
                 expires: Instant::now() + LIFETIME,
             },
         );
-        token
+        (token, description)
     }
 
     /// Runs `f` on a live challenge of that bot.
@@ -86,27 +149,34 @@ impl Challenges {
     }
 }
 
-/// The bot, if it exists and can run the Activity: `(definition, bot token,
-/// client secret)`.
-fn activity_bot(state: &AppState, slug: &str) -> Option<(BotDef, String, String)> {
+/// The bot and its token, if it exists.
+fn bot(state: &AppState, slug: &str) -> Option<(BotDef, String)> {
     let def = registry::find(&state.cfg.bots_dir, slug).ok().flatten()?;
     let token = def.token()?;
-    let secret = def.client_secret()?;
-    Some((def, token, secret))
+    Some((def, token))
 }
 
-fn uses_activity(config: &GuildConfig) -> bool {
+/// Is this server verifying members with that mode (`activity` or `web`)?
+fn uses(config: &GuildConfig, mode: &str) -> bool {
     let rules = &config.rules;
-    rules.enabled && rules.verification == "activity" && rules.verified_role.is_some()
+    rules.enabled && rules.verification == mode && rules.verified_role.is_some()
 }
 
 fn failure(message: &str) -> Json<Value> {
     Json(json!({ "ok": false, "error": message }))
 }
 
-/// "Start over": the page reloads and asks Discord for a new authorization.
+/// "Start over": the member has to click Verify again.
 fn restart(message: &str) -> Json<Value> {
     Json(json!({ "ok": false, "error": message, "restart": true }))
+}
+
+fn started(token: String, description: Value, name: &str) -> Json<Value> {
+    let mut answer = json!({ "ok": true, "token": token, "name": name });
+    if let (Some(answer), Some(extra)) = (answer.as_object_mut(), description.as_object()) {
+        answer.extend(extra.clone());
+    }
+    Json(answer)
 }
 
 #[derive(Deserialize)]
@@ -121,7 +191,10 @@ pub async fn page(
     Path(slug): Path<String>,
     Query(query): Query<PageQuery>,
 ) -> Result<Response, AppError> {
-    let (def, token, _) = activity_bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    if def.client_secret().is_none() {
+        return Err(AppError::NotFound);
+    }
     let identity = state
         .discord
         .bot_identity(Some(&token))
@@ -135,7 +208,17 @@ pub async fn page(
     } else {
         format!("/activity/{}/", def.slug)
     };
-    Ok(views::activity(&identity.id, &identity.username, &base).into_response())
+    Ok(views::verification(Some(&identity.id), &def.name, &base).into_response())
+}
+
+/// GET /verify/{slug}?v=... — the page opened from the Verify link.
+pub async fn link_page(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Response, AppError> {
+    let (def, _) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let base = format!("/activity/{}/", def.slug);
+    Ok(views::verification(None, &def.name, &base).into_response())
 }
 
 pub async fn script() -> impl IntoResponse {
@@ -154,20 +237,22 @@ pub struct SessionBody {
     guild_id: String,
 }
 
-/// POST /activity/{slug}/session — identifies the member and starts a captcha.
+/// POST /activity/{slug}/session — Activity: identifies the member with
+/// Discord's OAuth2 and starts a captcha.
 pub async fn session(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Json(body): Json<SessionBody>,
 ) -> Result<Json<Value>, AppError> {
-    let (def, token, secret) = activity_bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let secret = def.client_secret().ok_or(AppError::NotFound)?;
     let code_ok = (10..=100).contains(&body.code.len())
         && body.code.bytes().all(|b| b.is_ascii_alphanumeric());
     if !dc_core::is_snowflake(&body.guild_id) || !code_ok {
         return Err(AppError::BadRequest("Invalid request."));
     }
     let config = GuildConfig::load(&def.dir, &body.guild_id)?;
-    if !uses_activity(&config) {
+    if !uses(&config, "activity") {
         return Ok(failure("Verification is not enabled on this server."));
     }
     let identity = state
@@ -190,11 +275,50 @@ pub async fn session(
         }
     };
     let user = state.discord.oauth_user(&access_token).await?;
-    let challenge = state.challenges.create(&def.slug, &body.guild_id, &user.id);
+    let style = &config.rules.captcha_style;
+    let (challenge, description) =
+        state
+            .challenges
+            .create(&def.slug, &body.guild_id, &user.id, style);
     let name = user.global_name.unwrap_or(user.username);
-    Ok(Json(
-        json!({ "ok": true, "token": challenge, "name": name }),
-    ))
+    Ok(started(challenge, description, &name))
+}
+
+#[derive(Deserialize)]
+pub struct LinkBody {
+    link: String,
+}
+
+/// POST /activity/{slug}/link — Verify link: checks its signature and
+/// starts a captcha.
+pub async fn link_session(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(body): Json<LinkBody>,
+) -> Result<Json<Value>, AppError> {
+    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let Some(claims) = verify_link::check(&token, &def.slug, &body.link, dc_core::now()) else {
+        return Ok(restart(
+            "This link has expired or is not valid. Click Verify on the server again.",
+        ));
+    };
+    let config = GuildConfig::load(&def.dir, &claims.guild_id)?;
+    if !uses(&config, "web") {
+        return Ok(failure("Verification is not enabled on this server."));
+    }
+    let name = state
+        .discord
+        .user(&token, &claims.user_id)
+        .await
+        .map(|user| user.global_name.unwrap_or(user.username))
+        .unwrap_or_else(|_| "there".into());
+    let (challenge, description) = state.challenges.create(
+        &def.slug,
+        &claims.guild_id,
+        &claims.user_id,
+        &config.rules.captcha_style,
+    );
+    Ok(started(challenge, description, &name))
 }
 
 #[derive(Deserialize)]
@@ -202,7 +326,20 @@ pub struct TokenQuery {
     t: String,
 }
 
-/// GET /activity/{slug}/captcha.png?t=token
+async fn png(svg: String) -> Result<Response, AppError> {
+    let png = tokio::task::spawn_blocking(move || render::png(&svg))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .ok_or(AppError::BadRequest("The image could not be created."))?;
+    let headers = [
+        (header::CONTENT_TYPE, "image/png"),
+        (header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, png).into_response())
+}
+
+/// GET /activity/{slug}/captcha.png?t=token — the code to type.
 pub async fn captcha(
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -210,14 +347,36 @@ pub async fn captcha(
 ) -> Result<Response, AppError> {
     let code = state
         .challenges
-        .with(&slug, &query.t, |challenge| challenge.code.clone())
+        .with(&slug, &query.t, |challenge| match &challenge.puzzle {
+            Puzzle::Text(code) => Some(code.clone()),
+            Puzzle::Slide { .. } => None,
+        })
+        .flatten()
         .ok_or(AppError::NotFound)?;
-    let png = tokio::task::spawn_blocking(move || render::png(&render::captcha(&code)))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .ok_or(AppError::BadRequest("The image could not be created."))?;
-    Ok(([(header::CONTENT_TYPE, "image/png")], png).into_response())
+    png(render::captcha(&code)).await
+}
+
+/// GET /activity/{slug}/slide.png and piece.png — the slide captcha.
+pub async fn slide_image(
+    State(state): State<AppState>,
+    Path((slug, image)): Path<(String, String)>,
+    Query(query): Query<TokenQuery>,
+) -> Result<Response, AppError> {
+    let svg = state
+        .challenges
+        .with(&slug, &query.t, |challenge| match &challenge.puzzle {
+            Puzzle::Slide {
+                background, piece, ..
+            } => match image.as_str() {
+                "slide.png" => Some(background.clone()),
+                "piece.png" => Some(piece.clone()),
+                _ => None,
+            },
+            Puzzle::Text(_) => None,
+        })
+        .flatten()
+        .ok_or(AppError::NotFound)?;
+    png(svg).await
 }
 
 #[derive(Deserialize)]
@@ -227,64 +386,74 @@ pub struct TokenBody {
     answer: String,
 }
 
-/// POST /activity/{slug}/refresh — a new image for the same member.
+/// POST /activity/{slug}/refresh — a new captcha for the same member.
 pub async fn refresh(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Json(body): Json<TokenBody>,
-) -> (StatusCode, Json<Value>) {
+) -> Json<Value> {
     let renewed = state.challenges.with(&slug, &body.token, |challenge| {
         challenge.attempts += 1;
-        challenge.code = render::captcha_code();
-        challenge.attempts <= MAX_ATTEMPTS
+        challenge.puzzle = Puzzle::new(&challenge.style);
+        (challenge.attempts <= MAX_ATTEMPTS).then(|| challenge.puzzle.describe())
     });
-    match renewed {
-        Some(true) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Some(false) | None => {
+    match renewed.flatten() {
+        Some(description) => started(body.token, description, ""),
+        None => {
             state.challenges.remove(&body.token);
-            (StatusCode::OK, restart("This verification expired."))
+            restart("This verification expired. Click Verify on the server again.")
         }
     }
 }
 
-/// POST /activity/{slug}/answer — checks the code and verifies the member.
+/// POST /activity/{slug}/answer — checks the answer and verifies the member.
 pub async fn answer(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Json(body): Json<TokenBody>,
 ) -> Result<Json<Value>, AppError> {
-    let (def, _, _) = activity_bot(&state, &slug).ok_or(AppError::NotFound)?;
-    let typed = body.answer.trim().to_uppercase();
+    let (def, _) = bot(&state, &slug).ok_or(AppError::NotFound)?;
 
     enum Outcome {
         Passed { guild_id: String, user_id: String },
-        Wrong { left: u32 },
+        Wrong { left: u32, next: Value },
     }
     let outcome = state.challenges.with(&slug, &body.token, |challenge| {
-        if challenge.code == typed {
+        if challenge.puzzle.solved_by(&body.answer) {
             return Outcome::Passed {
                 guild_id: challenge.guild_id.clone(),
                 user_id: challenge.user_id.clone(),
             };
         }
-        // A wrong answer burns the code, so it cannot be guessed by trying.
+        // A wrong answer burns the captcha, so it cannot be guessed by trying.
         challenge.attempts += 1;
-        challenge.code = render::captcha_code();
+        challenge.puzzle = Puzzle::new(&challenge.style);
         Outcome::Wrong {
             left: MAX_ATTEMPTS.saturating_sub(challenge.attempts),
+            next: challenge.puzzle.describe(),
         }
     });
 
     match outcome {
-        None => Ok(restart("This verification expired.")),
-        Some(Outcome::Wrong { left: 0 }) => {
+        None => Ok(restart(
+            "This verification expired. Click Verify on the server again.",
+        )),
+        Some(Outcome::Wrong { left: 0, .. }) => {
             state.challenges.remove(&body.token);
-            Ok(restart("Too many wrong answers."))
+            Ok(restart(
+                "Too many wrong answers. Click Verify on the server again.",
+            ))
         }
-        Some(Outcome::Wrong { left }) => Ok(Json(json!({
-            "ok": false, "newImage": true,
-            "error": format!("That is not the code in the image. {left} attempt(s) left."),
-        }))),
+        Some(Outcome::Wrong { left, next }) => {
+            let mut answer = json!({
+                "ok": false, "newImage": true,
+                "error": format!("Not quite. {left} attempt(s) left."),
+            });
+            if let (Some(answer), Some(next)) = (answer.as_object_mut(), next.as_object()) {
+                answer.extend(next.clone());
+            }
+            Ok(Json(answer))
+        }
         Some(Outcome::Passed { guild_id, user_id }) => {
             state.challenges.remove(&body.token);
             let request = Request::Verify {
@@ -293,7 +462,7 @@ pub async fn answer(
             };
             let reply = bridge::ask_bot(&def.dir, &request).await;
             if reply.ok {
-                tracing::info!(bot = %def.slug, guild = %guild_id, user = %user_id, "verified in the Activity");
+                tracing::info!(bot = %def.slug, guild = %guild_id, user = %user_id, "member verified on the web");
                 Ok(Json(json!({ "ok": true })))
             } else {
                 Ok(restart(&reply.message))
@@ -311,8 +480,8 @@ mod tests {
     #[test]
     fn challenges_are_scoped_and_replaced() {
         let challenges = Challenges::default();
-        let first = challenges.create("sang", GUILD, "42");
-        let second = challenges.create("sang", GUILD, "42");
+        let (first, _) = challenges.create("sang", GUILD, "42", "text");
+        let (second, _) = challenges.create("sang", GUILD, "42", "text");
         assert_ne!(first, second);
         // A new challenge for the same member replaces the previous one.
         assert!(challenges.with("sang", &first, |_| ()).is_none());
@@ -327,7 +496,7 @@ mod tests {
     #[test]
     fn expired_challenges_are_ignored() {
         let challenges = Challenges::default();
-        let token = challenges.create("sang", GUILD, "42");
+        let (token, _) = challenges.create("sang", GUILD, "42", "text");
         challenges
             .0
             .lock()
@@ -339,14 +508,34 @@ mod tests {
     }
 
     #[test]
-    fn activity_needs_the_full_setup() {
+    fn puzzles() {
+        let text = Puzzle::Text("AB12C".into());
+        assert!(text.solved_by(" ab12c "));
+        assert!(!text.solved_by("AB12D"));
+        assert_eq!(text.describe()["kind"], "text");
+
+        let slide = Puzzle::new("slide");
+        let Puzzle::Slide { x, y, .. } = &slide else {
+            panic!("expected a slide puzzle");
+        };
+        assert!(slide.solved_by(&(x + 3).to_string()));
+        assert!(!slide.solved_by(&(x + 40).to_string()));
+        assert!(!slide.solved_by("left"));
+        let description = slide.describe();
+        assert_eq!(description["kind"], "slide");
+        assert_eq!(description["top"], y - render::PIECE_RISE);
+        // The answer is never sent to the page.
+        assert!(description.get("x").is_none());
+    }
+
+    #[test]
+    fn modes_need_the_full_setup() {
         let mut config = GuildConfig::default();
         config.rules.enabled = true;
-        config.rules.verification = "activity".into();
-        assert!(!uses_activity(&config));
+        config.rules.verification = "web".into();
+        assert!(!uses(&config, "web"));
         config.rules.verified_role = Some(GUILD.into());
-        assert!(uses_activity(&config));
-        config.rules.verification = "captcha".into();
-        assert!(!uses_activity(&config));
+        assert!(uses(&config, "web"));
+        assert!(!uses(&config, "activity"));
     }
 }

@@ -25,6 +25,8 @@ pub enum Tone {
     Info,
     Confirm,
     Gift,
+    Announce,
+    Maintenance,
 }
 
 impl Tone {
@@ -35,6 +37,8 @@ impl Tone {
             Self::Error | Self::Denied => "#ff5c5c",
             Self::Info => "#ededed",
             Self::Gift => "#f5c542",
+            Self::Announce => "#7aa2ff",
+            Self::Maintenance => "#f5a524",
         }
     }
 
@@ -56,6 +60,12 @@ impl Tone {
             }
             Self::Confirm => {
                 r#"<path d="M-9 -9 a9 9 0 1 1 13 8 c-4 2 -4 4 -4 8" fill="none" stroke-width="6"/><circle cx="0" cy="17" r="3.6" stroke="none"/>"#
+            }
+            Self::Announce => {
+                r#"<path d="M-16 -6 h8 l16 -10 v32 l-16 -10 h-8 z" stroke="none"/><path d="M-12 6 l3 12" fill="none" stroke-width="5"/><path d="M14 -6 a8 8 0 0 1 0 12 M18 -12 a15 15 0 0 1 0 24" fill="none" stroke-width="3.5"/>"#
+            }
+            Self::Maintenance => {
+                r#"<path d="M9 -17 a10 10 0 0 0 -11 13 l-14 14 a4 4 0 0 0 6 6 l14 -14 a10 10 0 0 0 13 -11 l-6 6 l-6 -2 l-2 -6 z" stroke="none"/>"#
             }
             Self::Gift => {
                 r#"<rect x="-17" y="-4" width="34" height="22" rx="3" fill="none" stroke-width="4.5"/><rect x="-20" y="-11" width="40" height="8" rx="2.5" stroke="none"/><path d="M0 -11 V18" fill="none" stroke-width="4.5"/><path d="M0 -11 c-4 -9 -15 -9 -11 -2 c2 3 7 2 11 2 c4 0 9 1 11 -2 c4 -7 -7 -7 -11 2" fill="none" stroke-width="3.5"/>"#
@@ -339,6 +349,8 @@ mod tests {
             Tone::Info,
             Tone::Confirm,
             Tone::Gift,
+            Tone::Announce,
+            Tone::Maintenance,
         ] {
             let svg = banner(
                 tone,
@@ -442,6 +454,19 @@ mod tests {
             (
                 "banner-success.png",
                 banner(Tone::Success, "Sang", "Member banned", ""),
+            ),
+            (
+                "banner-announce.png",
+                banner(Tone::Announce, "Sang", "Summer event this weekend", ""),
+            ),
+            (
+                "banner-maintenance.png",
+                banner(
+                    Tone::Maintenance,
+                    "Sang",
+                    "Maintenance in progress",
+                    "We are updating the server.",
+                ),
             ),
             (
                 "banner-gift.png",

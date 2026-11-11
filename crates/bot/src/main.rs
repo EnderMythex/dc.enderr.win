@@ -4,6 +4,7 @@
 //! is `bots/<slug>`: it holds `bot.toml`, the token in `.env`, the settings
 //! written by the dashboard and the bot's own data.
 
+mod announce;
 mod api;
 mod app;
 mod commands;
@@ -88,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         dir,
         def.owners.clone(),
-        def.name.clone(),
+        (def.name.clone(), def.slug.clone()),
         dashboard_url,
     ));
     ui::set_bot_name(&def.name);

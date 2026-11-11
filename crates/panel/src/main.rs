@@ -6,6 +6,7 @@ mod discord;
 mod docker;
 mod error;
 mod guilds;
+mod legal;
 mod routes;
 mod views;
 
@@ -34,6 +35,8 @@ pub struct AppState {
     pub notices: bridge::Notices,
     /// Captchas of the verification Activity.
     pub challenges: activity::Challenges,
+    /// Who runs the site, for the legal pages.
+    pub legal: Arc<legal::Operator>,
 }
 
 #[tokio::main]
@@ -65,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         docker: DockerClient::connect(),
         notices: Default::default(),
         challenges: Default::default(),
+        legal: Arc::new(legal::Operator::from_env()),
         cfg: Arc::new(cfg),
     };
 
@@ -93,6 +97,9 @@ fn app(state: AppState) -> Router {
         .route("/assets/app.js", get(routes::script))
         .route("/sw.js", get(routes::service_worker))
         .route("/offline", get(routes::offline))
+        .route("/legal", get(legal::notice))
+        .route("/privacy", get(legal::privacy))
+        .route("/terms", get(legal::terms))
         .route("/assets/favicon.svg", get(routes::favicon))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
@@ -110,6 +117,7 @@ fn app(state: AppState) -> Router {
             post(guilds::test),
         )
         .route("/bots/{slug}/servers/{guild_id}/reset", post(guilds::reset))
+        .route("/bots/{slug}/servers/{guild_id}/leave", post(guilds::leave))
         .route(
             "/bots/{slug}/servers/{guild_id}/preview/{image}",
             get(guilds::preview),
@@ -131,6 +139,9 @@ fn app(state: AppState) -> Router {
         .route("/activity/{slug}/app.js", get(activity::script))
         .route("/activity/{slug}/session", post(activity::session))
         .route("/activity/{slug}/captcha.png", get(activity::captcha))
+        .route("/activity/{slug}/{image}", get(activity::slide_image))
+        .route("/activity/{slug}/link", post(activity::link_session))
+        .route("/verify/{slug}", get(activity::link_page))
         .route("/activity/{slug}/refresh", post(activity::refresh))
         .route("/activity/{slug}/answer", post(activity::answer))
         .fallback(routes::not_found)

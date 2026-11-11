@@ -176,9 +176,35 @@ fn footer() -> Markup {
     html! {
         footer.foot {
             span { (BRAND) }
-            span { "Discord bot panel" }
+            nav.foot-links aria-label="Legal" {
+                a href="/legal" { "Legal notice" }
+                a href="/privacy" { "Privacy" }
+                a href="/terms" { "Terms" }
+            }
         }
     }
+}
+
+/// A legal page (notice, privacy, terms): readable text in the site's frame.
+pub fn legal_page(title: &str, updated: &str, body: Markup) -> Markup {
+    document(
+        title,
+        "public",
+        html! {
+            div.frame {
+                div.band.legal-head {
+                    a.back href="/" { (icon(ICON_BACK)) "Back to " (BRAND) }
+                    p.eyebrow { "Legal" }
+                    h1 { (title) }
+                    p.muted { "Last updated: " (updated) }
+                }
+                (rule())
+                main.band.prose { (body) }
+                (rule())
+                (footer())
+            }
+        },
+    )
 }
 
 /// Page of a logged-in user: top bar, a header band and a content band.
@@ -529,7 +555,12 @@ pub fn bot_overview(
     bot_page(session, bot, Tab::Overview, flash, content)
 }
 
-pub fn bot_servers(session: &Session, bot: &BotView, guilds: Result<Vec<Guild>, &str>) -> Markup {
+pub fn bot_servers(
+    session: &Session,
+    bot: &BotView,
+    guilds: Result<Vec<Guild>, &str>,
+    flash: Option<&str>,
+) -> Markup {
     let content = html! {
         @match guilds {
             Err(message) => { div.notice.bad role="alert" { (message) } }
@@ -578,7 +609,7 @@ pub fn bot_servers(session: &Session, bot: &BotView, guilds: Result<Vec<Guild>, 
             }
         }
     };
-    bot_page(session, bot, Tab::Servers, None, content)
+    bot_page(session, bot, Tab::Servers, flash, content)
 }
 
 pub fn bot_logs(
@@ -892,6 +923,11 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
                 ("button", "Button — one click to accept"),
                 ("captcha", "Captcha — type the code from an image"),
                 ("activity", "Activity — captcha in a Discord Activity"),
+                ("web", "Website — captcha on a page of this site, by link"),
+            ];
+            let styles = [
+                ("text", "Text — type the code shown in an image"),
+                ("slide", "Slide — slide a puzzle piece into place"),
             ];
             html! {
                 h2 { "Rules and verification" }
@@ -901,7 +937,8 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
                     input #title type="text" name="title" value=(rules.title) maxlength="80" required;
                 }))
                 (textarea("text", "Rules", "Discord formatting works: **bold**, lists, links.", &rules.text, 9, 1800))
-                (choice("verification", "Verification", "How members prove they accept the rules. The Activity opens a small window inside Discord; it needs a one-time setup by the administrator and falls back to the image captcha until then.", &modes, &rules.verification))
+                (choice("verification", "Verification", "How members prove they accept the rules. Website gives each member a personal link to a captcha page. The Activity opens it inside Discord but needs a one-time setup by the administrator; until then members get the image captcha.", &modes, &rules.verification))
+                (choice("captcha_style", "Captcha on the website and in the Activity", "", &styles, &rules.captcha_style))
                 (field("role", "Verified role", "Given once verified. Use it to unlock the rest of the server.", html! {
                     select #role name="role" { (role_options(roles, rules.verified_role.as_deref())) }
                 }))
@@ -1059,7 +1096,8 @@ fn guild_preview(
                 }
             };
             let extra = html! {
-                @if matches!(rules.verification.as_str(), "captcha" | "activity") {
+                @if rules.verification == "captcha"
+                    || (matches!(rules.verification.as_str(), "activity" | "web") && rules.captcha_style == "text") {
                     p.hint { "After clicking Verify, members type the code of an image like this one:" }
                     img.captcha src={ (base) "/preview/captcha.png" } alt="Sample captcha" width="460" height="170" loading="lazy";
                 }
@@ -1157,6 +1195,22 @@ fn danger_zone(session: &Session, base: &str) -> Markup {
                 button.btn.danger type="submit" { "Reset everything" }
             }
         }
+        form.card.form.danger-zone method="post" action={ (base) "/leave" } {
+            (csrf_field(session))
+            h2 { "Remove the bot from this server" }
+            p.muted {
+                "The bot leaves the server right away: its commands, panels and logs stop "
+                "there. Its settings for this server are kept, so inviting it again brings "
+                "everything back."
+            }
+            label.check {
+                input type="checkbox" name="confirm" value="on" required;
+                span { "Yes, remove the bot from this server" }
+            }
+            div.form-actions {
+                button.btn.danger type="submit" { "Remove the bot" }
+            }
+        }
     }
 }
 
@@ -1215,11 +1269,13 @@ pub fn guild_config(
     bot_page(session, bot, Tab::Servers, flash, content)
 }
 
-// ---------------------------------------------------------------- activity
+// ---------------------------------------------------------------- verification
 
-/// Verification page loaded inside Discord (see `activity.rs`). `base` is the
-/// prefix of its own URLs, which differs behind Discord's proxy.
-pub fn activity(client_id: &str, bot_name: &str, base: &str) -> Markup {
+/// Verification page, inside a Discord Activity (`client_id` set) or opened
+/// from a Verify link. `base` is the prefix of its own URLs, which differs
+/// behind Discord's proxy. Both captcha styles are in the page; the script
+/// shows the one the server uses.
+pub fn verification(client_id: Option<&str>, bot_name: &str, base: &str) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -1231,29 +1287,50 @@ pub fn activity(client_id: &str, bot_name: &str, base: &str) -> Markup {
                 title { "Verification · " (bot_name) }
                 link rel="stylesheet" href={ (base) "app.css" };
             }
-            body.public.activity data-base=(base) data-client-id=(client_id) {
+            body.public.activity data-base=(base) data-client-id=[client_id] {
                 main.activity-card {
                     div.login-mark { (icon(ICON_LOGO)) }
+                    p.eyebrow { (bot_name) }
                     h1 { "Verification" }
                     section #loading {
                         p.lead #loading-text { "Checking your Discord account…" }
                     }
                     section #challenge hidden {
-                        p.lead { "Hi " strong #who {} ". Type the characters shown in the image to get access to the server." }
-                        img.captcha #captcha alt="Captcha" width="460" height="170";
-                        form #form autocomplete="off" {
-                            input #answer type="text" name="answer" maxlength="5" required
-                                autocapitalize="characters" spellcheck="false"
-                                placeholder="ABC12" aria-label="Code shown in the image";
+                        p.lead #intro {
+                            "Hi " strong #who {} ". "
+                            span #intro-text {}
+                        }
+                        div #text-captcha hidden {
+                            img.captcha #captcha alt="Captcha" width="460" height="170";
+                            form #form autocomplete="off" {
+                                input #answer type="text" name="answer" maxlength="5"
+                                    autocapitalize="characters" spellcheck="false"
+                                    placeholder="ABC12" aria-label="Code shown in the image";
+                                div.actions {
+                                    button.btn #another type="button" { "Another image" }
+                                    button.btn.primary #submit type="submit" { "Verify" }
+                                }
+                            }
+                        }
+                        div #slide-captcha hidden {
+                            div.slide-frame #slide-frame {
+                                img #slide-bg alt="Puzzle" draggable="false";
+                                img.slide-piece #slide-piece alt="" draggable="false";
+                            }
+                            div.slider #slider role="slider" tabindex="0" aria-label="Slide the piece into place"
+                                aria-valuemin="0" aria-valuenow="0" {
+                                div.slider-fill #slider-fill {}
+                                div.slider-handle #slider-handle { "→" }
+                                span.slider-hint { "Slide to complete the puzzle" }
+                            }
                             div.actions {
-                                button.btn #another type="button" { "Another image" }
-                                button.btn.primary #submit type="submit" { "Verify" }
+                                button.btn #another-slide type="button" { "Another puzzle" }
                             }
                         }
                         p.activity-error #challenge-text role="alert" {}
                     }
                     section #done hidden {
-                        p.lead #done-text { "You are verified. Welcome! This window closes by itself." }
+                        p.lead #done-text { "You are verified. Welcome!" }
                     }
                     section #failed hidden {
                         p.lead #failed-text {}

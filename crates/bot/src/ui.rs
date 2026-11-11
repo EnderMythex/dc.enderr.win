@@ -22,6 +22,7 @@ pub const AMBER: u32 = 0xF5A524;
 pub const RED: u32 = 0xFF5C5C;
 pub const GREY: u32 = 0x4A4A4A;
 pub const GOLD: u32 = 0xF5C542;
+pub const BLUE: u32 = 0x7AA2FF;
 
 /// Discord allows 4000 characters of text per message; stay under it.
 const TEXT_LIMIT: usize = 3500;
@@ -40,6 +41,8 @@ pub struct Msg {
     pub ping_users: Vec<String>,
     /// Role ids the message is allowed to ping.
     pub ping_roles: Vec<String>,
+    /// Allows @everyone and @here (announcements chosen by an admin only).
+    pub ping_everyone: bool,
     /// Image still to draw; see `finish`.
     pending: Option<PendingImage>,
 }
@@ -71,6 +74,8 @@ fn tone_color(tone: Tone) -> u32 {
         Tone::Error | Tone::Denied => RED,
         Tone::Info => WHITE,
         Tone::Gift => GOLD,
+        Tone::Announce => BLUE,
+        Tone::Maintenance => AMBER,
     }
 }
 
@@ -231,7 +236,11 @@ impl Msg {
         let mut payload = json!({
             "flags": self.flags(),
             "components": self.components,
-            "allowed_mentions": { "parse": [], "users": self.ping_users, "roles": self.ping_roles },
+            "allowed_mentions": {
+                "parse": if self.ping_everyone { vec!["everyone"] } else { Vec::new() },
+                "users": self.ping_users,
+                "roles": self.ping_roles,
+            },
         });
         if !self.files.is_empty() {
             let attachments: Vec<Value> = self
@@ -402,6 +411,35 @@ pub fn modal(custom_id: &str, title: &str, inputs: &[(&str, &str, &str, u32)]) -
                 "placeholder": placeholder,
                 "max_length": max,
                 "required": true,
+            })])
+        })
+        .collect();
+    json!({ "custom_id": custom_id, "title": title, "components": rows })
+}
+
+/// A field of `form_modal`.
+pub struct Field<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub placeholder: &'a str,
+    pub max: u32,
+    /// Multi-line text box.
+    pub paragraph: bool,
+    pub required: bool,
+}
+
+pub fn form_modal(custom_id: &str, title: &str, fields: &[Field]) -> Value {
+    let rows: Vec<Value> = fields
+        .iter()
+        .map(|field| {
+            row(vec![json!({
+                "type": 4,
+                "custom_id": field.id,
+                "label": field.label,
+                "style": if field.paragraph { 2 } else { 1 },
+                "placeholder": field.placeholder,
+                "max_length": field.max,
+                "required": field.required,
             })])
         })
         .collect();

@@ -35,7 +35,8 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
   the bot is in. The bot notices saved changes within a few seconds — no restart.
 - Each server section shows a **preview** of what the bot posts (with the real
   images) and a **test button** that makes the running bot send it. The
-  **Danger zone** resets a server to its defaults, optionally erasing its XP.
+  **Danger zone** resets a server to its defaults (optionally erasing its XP)
+  or removes the bot from the server.
 - The panel only touches containers labelled `win.enderr.dc.bot=<slug>`.
 
 ## The bot
@@ -49,9 +50,10 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Roles | `/role add\|remove`, `/role add-all\|remove-all` (every member, with confirmation) | Welcome: roles given on arrival |
 | Levels | `/rank` (image card) `/leaderboard` (image) `/xp add\|remove\|reset` | Levels: XP rates, announcements, role rewards |
 | Welcome | `/settings welcome`, `/settings preview` | Welcome: channel, message, image |
-| Rules + verification | `/settings rules` | Rules: text, button / captcha image / Activity, verified role, role removed once verified |
+| Rules + verification | `/settings rules` | Rules: text, verification (button, captcha image, website link, Activity), captcha style (text or slide), verified role, role removed once verified |
 | Tickets | `/settings tickets` | Tickets: panel, category, staff, topics, transcripts |
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |
+| Announcements | `/announce` (form with title and text, picture, @everyone / @here / role) · `/maintenance start\|end` | — |
 | Giveaways | `/giveaway start\|end\|reroll\|cancel\|list`: Enter button with live count, optional required role, automatic draw, rerolls without previous winners | — |
 | Settings panel | `/settings view`: image of the configuration, a menu per module, buttons and pickers to change it; `/help` | Everything |
 
@@ -78,6 +80,15 @@ On <https://discord.com/developers/applications>, for the bot's application:
 Starting the bot registers its slash commands globally, replacing any commands
 previously registered for that application (the Activity's "Launch" entry
 point is kept).
+
+### Verification on the website
+
+With the *Website* verification mode, the Verify button gives each member a
+personal link to `/verify/<slug>` on the panel, signed with the bot's token
+for that member and server and valid for 10 minutes. The page shows the
+captcha chosen in the Rules section: **Text** (type the code of an image) or
+**Slide** (slide a puzzle piece into its hole). Nothing to set up besides the
+bot's `DASHBOARD_URL`, which tells it the panel's address.
 
 ### Verification in a Discord Activity (optional)
 
@@ -155,6 +166,8 @@ into that volume at every start.
    | `DISCORD_TOKEN_SANG` | the Sang bot token (secret) |
    | `DISCORD_CLIENT_SECRET_SANG` | optional, for the Activity verification |
    | `OWNERS_SANG` | optional, extra owner ids, comma-separated |
+   | `DISCORD_TOKEN_ELYZIUM`, `DISCORD_CLIENT_SECRET_ELYZIUM`, `OWNERS_ELYZIUM` | the same for ElyZium Bot |
+   | `LEGAL_NAME`, `LEGAL_ADDRESS`, `LEGAL_EMAIL` | publisher shown on the legal pages (`/legal`, `/privacy`, `/terms`) |
 
 3. **Domain**: on the `panel` service, `https://dc.enderr.win:8080` (8080 is
    the container port; Coolify's proxy serves HTTPS on 443). No domain for the bots.

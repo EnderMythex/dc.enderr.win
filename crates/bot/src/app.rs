@@ -29,6 +29,8 @@ pub struct App {
     pub owners: Vec<String>,
     /// The bot's name in `bot.toml`.
     pub name: String,
+    /// The bot's folder name, its id on the panel.
+    pub slug: String,
     /// Link to this bot's page on the dashboard, when configured.
     pub dashboard_url: Option<String>,
     /// Bot user id and application id, known once connected.
@@ -45,6 +47,8 @@ pub struct App {
     pub mass_roles: Mutex<std::collections::HashSet<String>>,
     /// Giveaways whose entry count changed: their message is refreshed soon.
     pub giveaways_changed: Mutex<std::collections::HashSet<(String, i64)>>,
+    /// `/announce` forms waiting to be filled in, by random id.
+    pub drafts: Mutex<HashMap<String, crate::announce::Draft>>,
 }
 
 pub struct Identity {
@@ -126,7 +130,7 @@ impl App {
         db: SqlitePool,
         dir: PathBuf,
         owners: Vec<String>,
-        name: String,
+        (name, slug): (String, String),
         dashboard_url: Option<String>,
     ) -> Self {
         Self {
@@ -136,6 +140,7 @@ impl App {
             dir,
             owners,
             name,
+            slug,
             dashboard_url,
             identity: OnceLock::new(),
             gateway: Mutex::default(),
@@ -147,7 +152,18 @@ impl App {
             confirmations: Mutex::default(),
             mass_roles: Mutex::default(),
             giveaways_changed: Mutex::default(),
+            drafts: Mutex::default(),
         }
+    }
+
+    /// Address of the panel (`https://dc.enderr.win`), from `DASHBOARD_URL`.
+    pub fn panel_origin(&self) -> Option<String> {
+        let url = self.dashboard_url.as_deref()?;
+        let scheme_end = url.find("://")? + 3;
+        let host_end = url[scheme_end..]
+            .find('/')
+            .map_or(url.len(), |index| scheme_end + index);
+        Some(url[..host_end].to_owned())
     }
 
     pub fn user_id(&self) -> &str {

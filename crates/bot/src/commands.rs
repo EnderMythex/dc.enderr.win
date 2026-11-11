@@ -9,6 +9,7 @@ const BOOLEAN: u8 = 5;
 const USER: u8 = 6;
 const CHANNEL: u8 = 7;
 const ROLE: u8 = 8;
+const ATTACHMENT: u8 = 11;
 
 /// Channel types offered by channel pickers.
 const TEXT_CHANNELS: [u8; 2] = [0, 5];
@@ -36,6 +37,17 @@ fn command(name: &str, description: &str, options: Vec<Value>) -> Value {
         // Server only: none of these make sense in private messages.
         "contexts": [0],
     })
+}
+
+/// Who to mention, for announcements and maintenance notices.
+fn mention_options() -> Vec<Value> {
+    let mut mention = option(STRING, "mention", "Mention @everyone or @here", false);
+    mention["choices"] = json!([
+        { "name": "Nobody", "value": "none" },
+        { "name": "@everyone", "value": "everyone" },
+        { "name": "@here", "value": "here" },
+    ]);
+    vec![mention, option(ROLE, "role", "Or mention this role", false)]
 }
 
 fn user_and_reason(what: &str) -> Vec<Value> {
@@ -239,6 +251,7 @@ pub fn all() -> Vec<Value> {
                                 { "name": "Button", "value": "button" },
                                 { "name": "Captcha image", "value": "captcha" },
                                 { "name": "Captcha in a Discord Activity", "value": "activity" },
+                                { "name": "Captcha on the website (personal link)", "value": "web" },
                             ]);
                             mode
                         },
@@ -370,6 +383,50 @@ pub fn all() -> Vec<Value> {
                     )],
                 ),
                 sub("list", "Show the running giveaways", vec![]),
+            ],
+        ),
+        command("announce", "Post an announcement with an image banner", {
+            let mut options = vec![channel(
+                "channel",
+                "Where to post it (defaults to this channel)",
+                &TEXT_CHANNELS,
+            )];
+            options.extend(mention_options());
+            options.push(option(
+                ATTACHMENT,
+                "image",
+                "A picture shown in the announcement",
+                false,
+            ));
+            options
+        }),
+        command(
+            "maintenance",
+            "Announce a maintenance, then its end",
+            vec![
+                sub("start", "Announce that a maintenance starts", {
+                    let mut options = vec![
+                        option(STRING, "reason", "What is happening", false),
+                        option(STRING, "duration", "Expected length: 30m, 2h, 1d…", false),
+                        channel(
+                            "channel",
+                            "Where to post it (defaults to this channel)",
+                            &TEXT_CHANNELS,
+                        ),
+                    ];
+                    options.extend(mention_options());
+                    options
+                }),
+                sub("end", "Announce that the maintenance is over", {
+                    let mut options = vec![option(
+                        STRING,
+                        "message",
+                        "Message shown with the end",
+                        false,
+                    )];
+                    options.extend(mention_options());
+                    options
+                }),
             ],
         ),
         command("help", "List the bot's commands", vec![]),

@@ -13,6 +13,7 @@ use reqwest::Method;
 use serde_json::{Value, json};
 
 use crate::{
+    announce,
     api::ApiResult,
     app::{App, bits_of, roles_of, str_of},
     giveaway, moderation, settings, tickets,
@@ -201,6 +202,12 @@ impl Options {
         self.values.get(name)?.as_bool()
     }
 
+    /// The attachment of a file option: `url`, `filename`, `size`, `content_type`.
+    pub fn attachment(&self, name: &str) -> Option<&Value> {
+        let file = &self.resolved["attachments"][self.str(name)?];
+        file.is_object().then_some(file)
+    }
+
     /// The user object of a user option.
     pub fn user(&self, name: &str) -> Option<&Value> {
         let user = &self.resolved["users"][self.str(name)?];
@@ -274,6 +281,8 @@ async fn command(ctx: &Ctx) {
         "role" => moderation::role(ctx, &options).await,
         "xp" => xp::manage(ctx, &options).await,
         "giveaway" => giveaway::command(ctx, &options).await,
+        "announce" => announce::announce(ctx, &options).await,
+        "maintenance" => announce::maintenance(ctx, &options).await,
         "settings" => settings::command(ctx, &options).await,
         _ => ctx.reply(Msg::error("Unknown command.")).await,
     }
@@ -306,6 +315,9 @@ async fn component(ctx: &Ctx) {
 }
 
 async fn modal_submit(ctx: &Ctx) {
+    if ctx.custom_id().starts_with("announce:") {
+        return announce::submitted(ctx).await;
+    }
     match str_of(&ctx.data, "custom_id") {
         "verify:code" => verify::check_code(ctx).await,
         _ => {

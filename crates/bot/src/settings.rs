@@ -50,6 +50,12 @@ const VERIFY_MODES: &[(&str, &str, &str)] = &[
         "Type the code shown in an image",
     ),
     ("activity", "Activity", "Captcha in a Discord Activity"),
+    ("web", "Website", "Captcha on a web page, by personal link"),
+];
+
+const CAPTCHA_STYLES: &[(&str, &str, &str)] = &[
+    ("text", "Text", "Type the code shown in an image"),
+    ("slide", "Slide", "Slide a puzzle piece into place"),
 ];
 
 const ANNOUNCE_MODES: &[(&str, &str, &str)] = &[
@@ -234,6 +240,11 @@ fn module_rows(names: &Names, config: &GuildConfig, module: &str) -> Vec<Row> {
                     "Verification",
                     "",
                     Shown::Chip(label_of(VERIFY_MODES, &r.verification)),
+                ),
+                Row::new(
+                    "Captcha style",
+                    "Website and Activity",
+                    Shown::Chip(label_of(CAPTCHA_STYLES, &r.captcha_style)),
                 ),
                 Row::new(
                     "Verified role",
@@ -437,6 +448,16 @@ fn module_controls(config: &GuildConfig, module: &str) -> Vec<Value> {
                     "Verification",
                     VERIFY_MODES,
                     &[r.verification.as_str()],
+                    1,
+                ),
+            ));
+            out.extend(labeled(
+                "Captcha style (website and Activity)",
+                ui::string_select(
+                    "settings:mode:captcha_style",
+                    "Captcha style",
+                    CAPTCHA_STYLES,
+                    &[r.captcha_style.as_str()],
                     1,
                 ),
             ));
@@ -728,7 +749,7 @@ async fn after_change(ctx: &Ctx, module: &str) {
 fn module_of(target: &str) -> &'static str {
     match target {
         "welcome" | "welcome_image" => "welcome",
-        "rules" | "verified" | "unverified" | "verification" => "rules",
+        "rules" | "verified" | "unverified" | "verification" | "captcha_style" => "rules",
         "tickets" | "ticket_category" | "staff" | "transcripts" => "tickets",
         "levels" | "announce" => "levels",
         "logs" | "logkinds" => "logs",
@@ -772,6 +793,7 @@ fn apply(config: &mut GuildConfig, kind: &str, target: &str, values: &[String]) 
         ("users", "admins") => config.admins.users = values.to_vec(),
 
         ("mode", "verification") => config.rules.verification = first?,
+        ("mode", "captcha_style") => config.rules.captcha_style = first?,
         ("mode", "announce") => config.xp.announce = first?,
         ("logkinds", _) => {
             let has = |id: &str| values.iter().any(|v| v == id);
@@ -866,6 +888,7 @@ pub async fn help(ctx: &Ctx) {
         let sections = [
             "**Channels**\n`/lock` `/unlock` · stop or allow writing\n`/hide` `/unhide` · hide or show a channel\n`/lockurl` · block links",
             "**Members**\n`/mute` `/unmute` · timeout\n`/kick` `/ban` · asks for confirmation\n`/unban`\n`/role add` `/role remove`\n`/role add-all` `/role remove-all` · every member\n`/xp add` `/xp remove` `/xp reset`",
+            "**Announcements**\n`/announce` · title, text, picture, mention\n`/maintenance start` `/maintenance end`",
             "**Giveaways**\n`/giveaway start` · prize, duration, winners\n`/giveaway end` `/giveaway reroll` `/giveaway cancel` `/giveaway list`",
             "**Configuration**\n`/settings view` · the settings panel\n`/settings welcome|rules|tickets|xp|logs`\n`/ownerbot add|remove|list` · bot admins",
         ];
