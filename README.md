@@ -190,6 +190,23 @@ names Coolify gives to containers do not matter.
 
 ## Security
 
+- **Rate limits (panel)**, per IP: forms, login and image previews 20 at once
+  then one every 3 s; the verification page 300 at once then 5 per second
+  (Discord's proxy may put every Activity user behind one address); other pages
+  120 then 2 per second. Over the limit: `429` with `Retry-After`. Behind a
+  proxy the client is the last `X-Forwarded-For` entry; set
+  `TRUSTED_PROXY_HOPS=2` if Cloudflare (or another proxy) sits in front of
+  Coolify's Traefik.
+- **Rate limits (bots)**: 8 commands, clicks or forms per user every 10
+  seconds; XP has its own cooldown, captchas 5 attempts.
+- **Bot admins cannot exceed their Discord rights**: unless they are Discord
+  administrators, the server owner or a bot owner, they can only give or take
+  roles below their highest role and without moderation permissions (`/role`,
+  automatic roles, verified role), only sanction members below them, and need
+  Discord's "Mention @everyone" permission to mention everyone. Moderation
+  roles are never given to every member at once.
+- No SQL is built from user input (every value is a bound parameter), HTML is
+  escaped by the templates, and the scripts never write HTML.
 - Discord OAuth2 login (`identify` scope only), `state` parameter checked.
 - Sessions: only the SHA-256 of the token is stored; `HttpOnly`, `SameSite=Lax` cookie.
 - CSRF token on every form.

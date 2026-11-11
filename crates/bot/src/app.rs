@@ -49,6 +49,8 @@ pub struct App {
     pub giveaways_changed: Mutex<std::collections::HashSet<(String, i64)>>,
     /// `/announce` forms waiting to be filled in, by random id.
     pub drafts: Mutex<HashMap<String, crate::announce::Draft>>,
+    /// Recent interactions per user, for the rate limit.
+    pub interaction_times: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
 pub struct Identity {
@@ -65,6 +67,8 @@ pub struct GuildInfo {
     pub roles: HashMap<String, u64>,
     /// Role id -> name, for the images.
     pub role_names: HashMap<String, String>,
+    /// Role id -> position in the role list (higher is more powerful).
+    pub role_positions: HashMap<String, i64>,
     pub channels: HashMap<String, ChannelInfo>,
 }
 
@@ -153,6 +157,7 @@ impl App {
             mass_roles: Mutex::default(),
             giveaways_changed: Mutex::default(),
             drafts: Mutex::default(),
+            interaction_times: Mutex::default(),
         }
     }
 
@@ -264,6 +269,40 @@ impl App {
         Some(response.bytes().await.ok()?.to_vec())
     }
 
+    /// Highest position among these roles (0: only @everyone).
+    pub fn top_position(&self, guild_id: &str, roles: &[String]) -> i64 {
+        let guilds = self.guilds.lock().unwrap();
+        let Some(guild) = guilds.get(guild_id) else {
+            return 0;
+        };
+        roles
+            .iter()
+            .filter_map(|role| guild.role_positions.get(role))
+            .copied()
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Takes one interaction from a user's allowance: `false` when they
+    /// went over `max` in the last `window`.
+    pub fn allow_interaction(
+        &self,
+        user_id: &str,
+        max: usize,
+        window: std::time::Duration,
+    ) -> bool {
+        let now = Instant::now();
+        let mut all = self.interaction_times.lock().unwrap();
+        if all.len() > 20_000 {
+            all.retain(|_, times| {
+                times
+                    .back()
+                    .is_some_and(|last| now.duration_since(*last) < window)
+            });
+        }
+        take_slot(all.entry(user_id.to_owned()).or_default(), now, max, window)
+    }
+
     /// Server owner or panel owner of this bot: may manage the admin list.
     pub fn is_super_admin(&self, guild_id: &str, user_id: &str) -> bool {
         self.owners.iter().any(|owner| owner == user_id)
@@ -302,6 +341,27 @@ impl App {
             .fold(0, |acc, bits| acc | bits);
         permissions & PERM_ADMINISTRATOR != 0
     }
+}
+
+/// Sliding window: `true` (and the moment is recorded) while fewer than
+/// `max` moments fall within `window` before `now`.
+fn take_slot(
+    times: &mut VecDeque<Instant>,
+    now: Instant,
+    max: usize,
+    window: std::time::Duration,
+) -> bool {
+    while times
+        .front()
+        .is_some_and(|first| now.duration_since(*first) >= window)
+    {
+        times.pop_front();
+    }
+    if times.len() >= max {
+        return false;
+    }
+    times.push_back(now);
+    true
 }
 
 // ---------------------------------------------------------------- JSON helpers
@@ -448,6 +508,19 @@ mod tests {
         assert!(cache.get("0").is_none());
         assert!(cache.get("1").is_some());
         assert!(cache.remove(&MESSAGE_CACHE_SIZE.to_string()).is_some());
+    }
+
+    #[test]
+    fn interaction_rate_limit() {
+        let window = std::time::Duration::from_secs(10);
+        let mut times = VecDeque::new();
+        let start = Instant::now();
+        for _ in 0..8 {
+            assert!(take_slot(&mut times, start, 8, window));
+        }
+        assert!(!take_slot(&mut times, start, 8, window));
+        // Refused attempts do not count: the allowance comes back in time.
+        assert!(take_slot(&mut times, start + window, 8, window));
     }
 
     #[test]

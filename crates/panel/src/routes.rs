@@ -131,7 +131,7 @@ pub async fn index(
         Some("expired") => Some("The login attempt expired. Please try again."),
         _ => None,
     };
-    Ok(views::login(error).into_response())
+    Ok(views::login(error, state.stats.get()).into_response())
 }
 
 pub async fn dashboard(

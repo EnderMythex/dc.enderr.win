@@ -252,6 +252,46 @@ fn check_target(ctx: &Ctx, target_id: &str, target_member: &Value) -> Result<(),
     if target_is_admin && !app.is_super_admin(&ctx.guild_id, ctx.user_id()) {
         return Err("Only the server owner or a bot owner can sanction another bot admin.");
     }
+    // Like Discord itself: nobody acts on someone placed at or above them.
+    if !target_member.is_null() && !ctx.is_trusted() {
+        let mine = app.top_position(&ctx.guild_id, &roles_of(&ctx.member));
+        let theirs = app.top_position(&ctx.guild_id, &roles_of(target_member));
+        if theirs >= mine {
+            return Err("That member's highest role is at or above yours.");
+        }
+    }
+    Ok(())
+}
+
+/// May this member give or take this role with the bot? Server admins and
+/// bot owners may; other bot admins only roles below their own highest role
+/// and without moderation permissions, so the bot never lets anyone grant
+/// themselves more power than they have.
+pub fn may_manage_role(ctx: &Ctx, role: &str) -> Result<(), &'static str> {
+    if role == ctx.guild_id {
+        return Err("@everyone cannot be given or taken.");
+    }
+    if ctx.is_trusted() {
+        return Ok(());
+    }
+    let app = &ctx.app;
+    let permissions = app
+        .guild(&ctx.guild_id)
+        .roles
+        .get(role)
+        .copied()
+        .unwrap_or(0);
+    if permissions & POWERFUL != 0 {
+        return Err(
+            "This role has moderation or admin permissions. Only the server owner, \
+             Discord administrators and the bot's owners can hand it out.",
+        );
+    }
+    let mine = app.top_position(&ctx.guild_id, &roles_of(&ctx.member));
+    let role_position = app.top_position(&ctx.guild_id, &[role.to_owned()]);
+    if role_position >= mine {
+        return Err("You can only hand out roles below your highest role.");
+    }
     Ok(())
 }
 
@@ -592,13 +632,17 @@ async fn ask_mass_role(ctx: &Ctx, options: &Options, add: bool) {
     }
     let guild = ctx.app.guild(&ctx.guild_id);
     let permissions = guild.roles.get(&role).copied().unwrap_or(0);
-    if permissions & POWERFUL != 0 && !ctx.app.is_super_admin(&ctx.guild_id, ctx.user_id()) {
+    // Even for trusted members: handing admin rights to the whole server is
+    // never what anyone wants.
+    if permissions & POWERFUL != 0 && add {
         return ctx
             .reply(Msg::denied_with(
-                "This role has moderation or admin permissions. Only the server owner \
-                 and the bot's owners can give it to everyone.",
+                "This role has moderation or admin permissions: it cannot be given to everyone.",
             ))
             .await;
+    }
+    if let Err(reason) = may_manage_role(ctx, &role) {
+        return ctx.reply(Msg::denied_with(reason)).await;
     }
     if ctx.app.mass_roles.lock().unwrap().contains(&ctx.guild_id) {
         let text = "A role is already being given or taken on this server. Wait until it ends.";
@@ -687,10 +731,8 @@ pub async fn role(ctx: &Ctx, options: &Options) {
             .reply(Msg::error("That user is not on this server."))
             .await;
     }
-    if role == ctx.guild_id {
-        return ctx
-            .reply(Msg::error("@everyone cannot be given or taken."))
-            .await;
+    if let Err(reason) = may_manage_role(ctx, role) {
+        return ctx.reply(Msg::denied_with(reason)).await;
     }
     ctx.defer(false).await;
     let add = options.sub.as_deref() != Some("remove");

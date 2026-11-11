@@ -649,6 +649,11 @@ pub async fn command(ctx: &Ctx, options: &Options) {
         return ctx.reply(msg).await;
     }
 
+    if let Some(role) = options.str("role")
+        && let Err(reason) = crate::moderation::may_manage_role(ctx, role)
+    {
+        return ctx.reply(Msg::denied_with(reason)).await;
+    }
     let enabled = options.bool("enabled");
     let id = |name: &str| options.str(name).map(str::to_owned);
     let module = match sub {
@@ -858,6 +863,16 @@ pub async fn component(ctx: &Ctx) {
             return ctx.reply(msg).await;
         }
         _ => {}
+    }
+
+    // Roles members receive automatically must be ones this member could
+    // hand out by hand (see `moderation::may_manage_role`).
+    if kind == "roles" && matches!(target, "welcome" | "verified") {
+        for role in &values {
+            if let Err(reason) = crate::moderation::may_manage_role(ctx, role) {
+                return ctx.reply(Msg::denied_with(reason)).await;
+            }
+        }
     }
 
     // Only the server owner and the bot's owners may change the admins.

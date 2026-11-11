@@ -31,7 +31,20 @@ pub enum Mention {
     Role(String),
 }
 
+/// Discord's "Mention @everyone, @here and All Roles" permission.
+const MENTION_EVERYONE: u64 = 1 << 17;
+
 impl Mention {
+    /// Refuses mentions the member could not make themselves.
+    fn check(&self, ctx: &Ctx) -> Result<(), &'static str> {
+        match self {
+            Self::Everyone | Self::Here if !ctx.has_permission(MENTION_EVERYONE) => {
+                Err("You need Discord's \"Mention @everyone\" permission to mention everyone.")
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn from_options(options: &Options) -> Self {
         match (options.str("mention"), options.str("role")) {
             (Some("everyone"), _) => Self::Everyone,
@@ -76,6 +89,9 @@ pub struct Draft {
 
 /// `/announce`: checks the options, then opens the form.
 pub async fn announce(ctx: &Ctx, options: &Options) {
+    if let Err(reason) = Mention::from_options(options).check(ctx) {
+        return ctx.reply(Msg::denied_with(reason)).await;
+    }
     let image = match options.attachment("image") {
         None => None,
         Some(file) => {
@@ -300,6 +316,9 @@ pub async fn maintenance(ctx: &Ctx, options: &Options) {
         .ok()
         .flatten();
     let mention = Mention::from_options(options);
+    if let Err(reason) = mention.check(ctx) {
+        return ctx.reply(Msg::denied_with(reason)).await;
+    }
 
     if options.sub.as_deref() == Some("end") {
         let Some(notice) = current else {

@@ -222,6 +222,13 @@ async fn dispatch(app: &Arc<App>, kind: &str, d: Value) {
                         )
                     })
                     .collect(),
+                role_positions: collect("roles")
+                    .iter()
+                    .map(|role| {
+                        let position = role["position"].as_i64().unwrap_or(0);
+                        (str_of(role, "id").to_owned(), position)
+                    })
+                    .collect(),
                 channels: collect("channels")
                     .iter()
                     .map(|channel| (str_of(channel, "id").to_owned(), channel_info(channel)))
@@ -253,12 +260,17 @@ async fn dispatch(app: &Arc<App>, kind: &str, d: Value) {
                     str_of(role, "id").to_owned(),
                     str_of(role, "name").to_owned(),
                 );
+                guild.role_positions.insert(
+                    str_of(role, "id").to_owned(),
+                    role["position"].as_i64().unwrap_or(0),
+                );
             }
         }
         "GUILD_ROLE_DELETE" => {
             if let Some(guild) = app.guilds.lock().unwrap().get_mut(&guild_id) {
                 guild.roles.remove(str_of(&d, "role_id"));
                 guild.role_names.remove(str_of(&d, "role_id"));
+                guild.role_positions.remove(str_of(&d, "role_id"));
             }
         }
         "GUILD_MEMBER_ADD" => {

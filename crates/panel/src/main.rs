@@ -7,7 +7,9 @@ mod docker;
 mod error;
 mod guilds;
 mod legal;
+mod ratelimit;
 mod routes;
+mod stats;
 mod views;
 
 use std::{sync::Arc, time::Instant};
@@ -37,6 +39,9 @@ pub struct AppState {
     pub challenges: activity::Challenges,
     /// Who runs the site, for the legal pages.
     pub legal: Arc<legal::Operator>,
+    /// Servers and members, for the home page.
+    pub stats: stats::Stats,
+    pub limiter: ratelimit::Limiter,
 }
 
 #[tokio::main]
@@ -69,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
         notices: Default::default(),
         challenges: Default::default(),
         legal: Arc::new(legal::Operator::from_env()),
+        stats: Default::default(),
+        limiter: ratelimit::Limiter::new(
+            std::env::var("TRUSTED_PROXY_HOPS")
+                .ok()
+                .and_then(|hops| hops.trim().parse().ok())
+                .unwrap_or(1),
+        ),
         cfg: Arc::new(cfg),
     };
 
@@ -81,7 +93,9 @@ async fn main() -> anyhow::Result<()> {
         state.cfg.public_url
     );
 
-    axum::serve(listener, app(state))
+    tokio::spawn(stats::watch(state.clone()));
+    let service = app(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    axum::serve(listener, service)
         .with_graceful_shutdown(async {
             tokio::signal::ctrl_c().await.ok();
         })
@@ -165,12 +179,38 @@ const CSP: &str = "default-src 'none'; style-src 'self'; script-src 'self'; \
 const ACTIVITY_CSP: &str = "default-src 'none'; style-src 'self'; script-src 'self'; \
     img-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'";
 
+fn too_many_requests(path: &str, wait: u64) -> Response {
+    use axum::response::IntoResponse;
+    let status = axum::http::StatusCode::TOO_MANY_REQUESTS;
+    let retry = [(header::RETRY_AFTER, wait.to_string())];
+    let message = "Too many requests. Wait a moment, then try again.";
+    // The verification page reads JSON answers.
+    let mut response = if path.starts_with("/activity/") {
+        let body = serde_json::json!({ "ok": false, "error": message });
+        (status, retry, axum::Json(body)).into_response()
+    } else {
+        (status, retry, views::error_page(429, "Slow down", message)).into_response()
+    };
+    response
+        .headers_mut()
+        .insert("x-dc-panel", HeaderValue::from_static("1"));
+    response
+}
+
 /// Adds security headers and logs the request. Only the path is logged, never
 /// the query string, which holds the OAuth code on the Discord callback.
 async fn harden_and_log(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
     let started = Instant::now();
+
+    if let Some(tier) = ratelimit::Tier::of(&method, &path)
+        && let Some(ip) = state.limiter.client_ip(&request)
+        && let Err(wait) = state.limiter.check(ip, tier)
+    {
+        tracing::warn!(%ip, ?tier, "{method} {path} -> 429 (rate limited)");
+        return too_many_requests(&path, wait);
+    }
 
     let mut response = next.run(request).await;
 
@@ -194,6 +234,18 @@ async fn harden_and_log(State(state): State<AppState>, request: Request, next: N
         header::REFERRER_POLICY,
         HeaderValue::from_static("same-origin"),
     );
+    // The panel needs no camera, microphone, location or payment.
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=(), usb=()"),
+    );
+    if !in_activity {
+        // Isolates the panel from windows it opens or that open it.
+        headers.insert(
+            "cross-origin-opener-policy",
+            HeaderValue::from_static("same-origin"),
+        );
+    }
     headers
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-store"));

@@ -30,6 +30,17 @@ static STYLESHEET: LazyLock<String> = LazyLock::new(|| {
     format!("/assets/app.css?v={}", &hash[..12])
 });
 
+/// `?v=` of the verification page's script and stylesheet. Discord's proxy
+/// caches the Activity's files: a new version needs a new URL.
+static VERIFY_VERSION: LazyLock<String> = LazyLock::new(|| {
+    let both = format!(
+        "{}{}",
+        include_str!("../assets/activity.js"),
+        include_str!("../assets/app.css")
+    );
+    dc_core::crypto::sha256_hex(&both)[..12].to_owned()
+});
+
 static SCRIPT: LazyLock<String> = LazyLock::new(|| {
     let hash = dc_core::crypto::sha256_hex(include_str!("../assets/app.js"));
     format!("/assets/app.js?v={}", &hash[..12])
@@ -255,7 +266,7 @@ fn app_page(
 
 // ---------------------------------------------------------------- public pages
 
-pub fn login(error: Option<&str>) -> Markup {
+pub fn login(error: Option<&str>, totals: Option<crate::stats::Totals>) -> Markup {
     document(
         "Log in",
         "public",
@@ -279,6 +290,18 @@ pub fn login(error: Option<&str>) -> Markup {
                     p.fineprint {
                         "Only your id, username and avatar are read. "
                         "The panel never accesses your messages or servers."
+                    }
+                    @if let Some(totals) = totals.filter(|t| t.servers > 0) {
+                        div.stats aria-label="Bots in numbers" {
+                            div.stat {
+                                strong { (thousands(totals.servers as u64)) }
+                                span { @if totals.servers == 1 { "server" } @else { "servers" } }
+                            }
+                            div.stat {
+                                strong { (thousands(totals.members)) }
+                                span { @if totals.members == 1 { "member" } @else { "members" } }
+                            }
+                        }
                     }
                 }
                 (rule())
@@ -1287,7 +1310,7 @@ pub fn verification(client_id: Option<&str>, bot_name: &str, base: &str) -> Mark
                 meta name="color-scheme" content="dark";
                 meta name="robots" content="noindex";
                 title { "Verification · " (bot_name) }
-                link rel="stylesheet" href={ (base) "app.css" };
+                link rel="stylesheet" href={ (base) "app.css?v=" (VERIFY_VERSION.as_str()) };
             }
             body.public.activity data-base=(base) data-client-id=[client_id] {
                 main.activity-card {
@@ -1339,7 +1362,7 @@ pub fn verification(client_id: Option<&str>, bot_name: &str, base: &str) -> Mark
                         button.btn #retry type="button" { "Try again" }
                     }
                 }
-                script src={ (base) "app.js" } defer {}
+                script src={ (base) "app.js?v=" (VERIFY_VERSION.as_str()) } defer {}
             }
         }
     }

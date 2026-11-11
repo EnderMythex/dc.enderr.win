@@ -225,7 +225,8 @@ pub async fn script() -> impl IntoResponse {
     (
         [
             (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=300"),
+            // Versioned URL (see `views::verification`): safe to keep.
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
         ],
         include_str!("../assets/activity.js"),
     )

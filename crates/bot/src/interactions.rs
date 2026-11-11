@@ -22,6 +22,10 @@ use crate::{
 };
 
 const PERM_ADMINISTRATOR: u64 = 1 << 3;
+/// At most this many commands, clicks and forms per user...
+const RATE_MAX: usize = 8;
+/// ...in this window.
+const RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One interaction and everything needed to answer it.
 pub struct Ctx {
@@ -44,6 +48,19 @@ impl Ctx {
 
     pub fn config(&self) -> Arc<GuildConfig> {
         self.app.config(&self.guild_id)
+    }
+
+    /// Discord Administrator, server owner or bot owner: may already do
+    /// anything on the server, so no limit of the bot applies to them.
+    pub fn is_trusted(&self) -> bool {
+        bits_of(&self.member["permissions"]) & PERM_ADMINISTRATOR != 0
+            || self.app.is_super_admin(&self.guild_id, self.user_id())
+    }
+
+    /// A permission the member has in this channel (Discord computes them).
+    pub fn has_permission(&self, bit: u64) -> bool {
+        let permissions = bits_of(&self.member["permissions"]);
+        permissions & (bit | PERM_ADMINISTRATOR) != 0
     }
 
     /// True for bot admins; Discord computes the member's permissions for us.
@@ -241,6 +258,19 @@ pub async fn handle(app: Arc<App>, interaction: Value) {
         ctx.reply(Msg::error("This bot only works inside a server."))
             .await;
         return;
+    }
+    // Spamming commands or buttons (captchas, giveaways, images) is slowed down.
+    if !ctx
+        .app
+        .allow_interaction(ctx.user_id(), RATE_MAX, RATE_WINDOW)
+    {
+        let msg = Msg::banner(
+            dc_core::cards::Tone::Warning,
+            "Slow down",
+            "You are going too fast. Wait a few seconds, then try again.",
+            Vec::new(),
+        );
+        return ctx.reply(msg.ephemeral()).await;
     }
 
     match kind {
