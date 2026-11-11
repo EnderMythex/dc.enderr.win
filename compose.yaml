@@ -1,0 +1,27 @@
+# The panel. Each bot runs separately from bots/<slug>/compose.yaml.
+services:
+  panel:
+    build:
+      context: .
+      target: panel
+    image: dc-panel:latest
+    container_name: dc-panel
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BIND_ADDR: 0.0.0.0:8080
+      DATABASE_URL: sqlite:///data/panel.db
+      BOTS_DIR: /bots
+    # Lets the non-root panel user talk to the Docker socket.
+    group_add:
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - panel-data:/data
+      # Writable: the panel saves bots/<slug>/settings.json.
+      - ./bots:/bots
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  panel-data:

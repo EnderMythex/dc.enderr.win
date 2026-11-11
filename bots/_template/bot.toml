@@ -1,0 +1,16 @@
+# Copy this folder to bots/<slug>/ (slug: a-z, 0-9 and "-" only).
+# The panel picks up changes to this file without a restart.
+
+# Name shown in the panel.
+name = "My Bot"
+
+# Optional short description shown on the dashboard.
+description = "What this bot does."
+
+# Discord user ids allowed to manage this bot from the panel.
+# (Discord: Settings > Advanced > Developer Mode, then right-click a user > Copy User ID.)
+owners = ["000000000000000000"]
+
+# Optional. Docker container name; defaults to "dc-bot-<slug>".
+# Must match container_name in compose.yaml.
+# container = "dc-bot-my-bot"

@@ -1,0 +1,69 @@
+# Deployment on Coolify: the panel and every bot in one Docker Compose
+# resource (see "Deploying on Coolify" in the README).
+#
+# - Secrets are environment variables set in Coolify, never files.
+# - The panel and the bots share the `bots` volume: the panel writes each
+#   server's settings there, the bots read them and keep their database there.
+# - bot.toml files come with the image and are copied into the volume at
+#   every start, so the repository stays the source of truth.
+#
+# Adding a bot: copy the `bot-sang` service, replace "sang" / "SANG" with the
+# new folder name, and add its DISCORD_TOKEN_<SLUG> to the panel too.
+
+services:
+  panel:
+    build:
+      context: .
+      target: panel
+    restart: unless-stopped
+    environment:
+      # Discord application used to log in to the panel.
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?}
+      PUBLIC_URL: ${PUBLIC_URL:-https://dc.enderr.win}
+      # Staff: ids that see and manage every bot (comma-separated).
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      BIND_ADDR: 0.0.0.0:8080
+      DATABASE_URL: sqlite:///data/panel.db
+      BOTS_DIR: /bots
+      BOTS_SEED_DIR: /opt/dc/bots
+      # One line of each per bot: the panel needs the token to show its
+      # servers and change its profile.
+      DISCORD_TOKEN_SANG: ${DISCORD_TOKEN_SANG:?}
+      DISCORD_CLIENT_SECRET_SANG: ${DISCORD_CLIENT_SECRET_SANG:-}
+      OWNERS_SANG: ${OWNERS_SANG:-}
+    # Lets the non-root panel user use the Docker socket, to start, stop and
+    # read the logs of the bots. Value: `stat -c %g /var/run/docker.sock`.
+    group_add:
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - panel-data:/data
+      - bots:/bots
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8080"
+
+  bot-sang:
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    depends_on:
+      - panel
+    environment:
+      BOT_SLUG: sang
+      BOT_CONFIG_DIR: /bots/sang
+      BOTS_SEED_DIR: /opt/dc/bots
+      DISCORD_TOKEN: ${DISCORD_TOKEN_SANG:?}
+      DISCORD_CLIENT_SECRET_SANG: ${DISCORD_CLIENT_SECRET_SANG:-}
+      OWNERS_SANG: ${OWNERS_SANG:-}
+      DASHBOARD_URL: ${PUBLIC_URL:-https://dc.enderr.win}/bots/sang
+    labels:
+      # Required: the panel only controls containers carrying this label.
+      win.enderr.dc.bot: sang
+    volumes:
+      - bots:/bots
+
+volumes:
+  panel-data:
+  bots:

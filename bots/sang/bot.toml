@@ -1,0 +1,7 @@
+# Sang — moderation, levels, welcome, verification, tickets and logs.
+
+name = "Sang"
+description = "Moderation, levels, welcome, verification, tickets and logs."
+
+# Discord user ids allowed to manage this bot from the panel.
+owners = ["562966788925816872"]

@@ -1,0 +1,25 @@
+# One container per bot. Replace every "my-bot" with the folder name (slug),
+# then from the repository root:
+#   docker compose -f bots/my-bot/compose.yaml up -d --build
+name: dc-bot-my-bot
+
+services:
+  bot:
+    build:
+      context: ../..
+      target: bot
+    image: dc-bot:latest
+    container_name: dc-bot-my-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BOT_SLUG: my-bot
+      BOT_CONFIG_DIR: /config
+      DASHBOARD_URL: https://dc.enderr.win/bots/my-bot
+    labels:
+      # Required: the panel only controls containers carrying this label
+      # with the bot's slug as value.
+      win.enderr.dc.bot: my-bot
+    volumes:
+      # bot.toml, guilds/ (written by the panel) and data/ (the bot's database).
+      - ./:/config

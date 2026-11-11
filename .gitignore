@@ -1,0 +1,14 @@
+/target
+.env
+/data
+*.db
+*.db-shm
+*.db-wal
+
+# Per-bot secrets and state written by the panel and the bot.
+/bots/*/.env
+/bots/*/settings.json
+/bots/*/.settings.json.tmp
+/bots/*/guilds/
+/bots/*/data/
+/bots/*/requests/
