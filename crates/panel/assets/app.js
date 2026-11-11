@@ -70,11 +70,32 @@
     hideOverlay();
   };
 
+  const RELOADS = 'dc-offline-reloads';
+  const storage = {
+    get: () => { try { return Number(sessionStorage.getItem(RELOADS) || 0); } catch { return 0; } },
+    set: (n) => { try { sessionStorage.setItem(RELOADS, String(n)); } catch { /* private mode */ } },
+    clear: () => { try { sessionStorage.removeItem(RELOADS); } catch { /* private mode */ } },
+  };
+
   if (offlinePage) {
     // A placeholder shown by the service worker: load the real page once the
-    // panel answers again.
-    waitForPanel().then(() => location.reload());
+    // panel answers again. If the placeholder keeps coming back while the
+    // panel answers, the service worker is at fault: remove it.
+    waitForPanel().then(async () => {
+      const reloads = storage.get();
+      if (reloads >= 2) {
+        storage.clear();
+        try {
+          const registrations = await navigator.serviceWorker?.getRegistrations() ?? [];
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+        } catch { /* nothing to remove */ }
+      } else {
+        storage.set(reloads + 1);
+      }
+      location.reload();
+    });
   } else {
+    storage.clear();
     setInterval(async () => {
       if (!overlay && document.visibilityState === 'visible' && !(await healthy())) lost();
     }, 5000);

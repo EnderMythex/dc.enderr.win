@@ -3,7 +3,7 @@
 // page with "Recovering connection", which reloads once the panel is back.
 'use strict';
 
-const CACHE = 'dc-panel-offline-v1';
+const CACHE = 'dc-panel-offline-v2';
 const OFFLINE = '/offline';
 
 self.addEventListener('install', (event) => {
@@ -35,6 +35,14 @@ self.addEventListener('activate', (event) => {
 
 const fromPanel = (response) => response.headers.has('x-dc-panel');
 
+/// The proxy's own error page while the panel is down: a 404 or a 5xx that
+/// does not come from the panel. Anything else, redirects included (they
+/// come back opaque, with no status or headers), is passed on untouched.
+const isProxyError = (response) =>
+  response.type !== 'opaqueredirect'
+  && !fromPanel(response)
+  && (response.status === 404 || response.status >= 500);
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -46,7 +54,7 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         try {
           const response = await fetch(request);
-          if (fromPanel(response) || response.ok) return response;
+          if (!isProxyError(response)) return response;
         } catch {
           // Network error: the panel is unreachable.
         }
