@@ -153,6 +153,22 @@ pub fn all() -> Vec<Value> {
                         option(ROLE, "role", "Role to take", true),
                     ],
                 ),
+                sub(
+                    "add-all",
+                    "Give a role to every member of the server (@everyone)",
+                    vec![
+                        option(ROLE, "role", "Role to give", true),
+                        option(BOOLEAN, "include_bots", "Give it to bots too", false),
+                    ],
+                ),
+                sub(
+                    "remove-all",
+                    "Take a role from every member of the server (@everyone)",
+                    vec![
+                        option(ROLE, "role", "Role to take", true),
+                        option(BOOLEAN, "include_bots", "Take it from bots too", false),
+                    ],
+                ),
             ],
         ),
         command(

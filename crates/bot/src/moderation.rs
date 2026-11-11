@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::{
     app::{App, bits_of, display_name, format_duration, iso8601, parse_duration, roles_of, str_of},
     interactions::{Ctx, Options},
-    logs,
+    logs, massrole,
     ui::{self, Msg},
 };
 
@@ -355,18 +355,27 @@ pub async fn unmute(ctx: &Ctx, options: &Options) {
     .await;
 }
 
-/// A ban or a kick waiting for confirmation.
+/// An action waiting for the moderator's confirmation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Removal {
-    Ban { delete_days: i64 },
+pub enum Confirmable {
+    Ban {
+        delete_days: i64,
+    },
     Kick,
+    /// A role (the pending target) given to or taken from every member.
+    MassRole {
+        add: bool,
+        include_bots: bool,
+    },
 }
 
-impl Removal {
+impl Confirmable {
     fn verb(self) -> &'static str {
         match self {
             Self::Ban { .. } => "Ban",
             Self::Kick => "Kick",
+            Self::MassRole { add: true, .. } => "Give to everyone",
+            Self::MassRole { add: false, .. } => "Take from everyone",
         }
     }
 
@@ -374,13 +383,14 @@ impl Removal {
         match self {
             Self::Ban { .. } => "Member banned",
             Self::Kick => "Member kicked",
+            Self::MassRole { .. } => "Started",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Pending {
-    removal: Removal,
+    removal: Confirmable,
     guild_id: String,
     target: String,
     reason: String,
@@ -391,20 +401,50 @@ pub struct Pending {
 
 pub async fn ban(ctx: &Ctx, options: &Options) {
     let delete_days = options.int("delete_days").unwrap_or(0).clamp(0, 7);
-    ask_removal(ctx, options, Removal::Ban { delete_days }).await;
+    ask_removal(ctx, options, Confirmable::Ban { delete_days }).await;
 }
 
 pub async fn kick(ctx: &Ctx, options: &Options) {
-    ask_removal(ctx, options, Removal::Kick).await;
+    ask_removal(ctx, options, Confirmable::Kick).await;
+}
+
+/// Keeps an action until it is confirmed; returns its id for the buttons.
+fn remember(ctx: &Ctx, removal: Confirmable, target: &str, reason: &str) -> String {
+    let id = random_token(8);
+    let mut pending = ctx.app.confirmations.lock().unwrap();
+    pending.retain(|_, p| p.expires > Instant::now());
+    pending.insert(
+        id.clone(),
+        Pending {
+            removal,
+            guild_id: ctx.guild_id.clone(),
+            target: target.to_owned(),
+            reason: reason.to_owned(),
+            author: ctx.user_id().to_owned(),
+            expires: Instant::now() + CONFIRM_LIFETIME,
+        },
+    );
+    id
+}
+
+fn confirm_buttons(removal: Confirmable, id: &str) -> Value {
+    ui::row(vec![
+        ui::button(
+            ui::STYLE_DANGER,
+            removal.verb(),
+            &format!("confirm:yes:{id}"),
+        ),
+        ui::button(ui::STYLE_SECONDARY, "Cancel", &format!("confirm:no:{id}")),
+    ])
 }
 
 /// `/ban` and `/kick` first show what will happen, with Confirm / Cancel.
-async fn ask_removal(ctx: &Ctx, options: &Options, removal: Removal) {
+async fn ask_removal(ctx: &Ctx, options: &Options, removal: Confirmable) {
     let (Some(target), Some(user)) = (options.str("user"), options.user("user")) else {
         return ctx.reply(Msg::error("Unknown user.")).await;
     };
     let member = options.member("user");
-    if removal == Removal::Kick && member.is_null() {
+    if removal == Confirmable::Kick && member.is_null() {
         return ctx
             .reply(Msg::error("That user is not on this server."))
             .await;
@@ -416,48 +456,27 @@ async fn ask_removal(ctx: &Ctx, options: &Options, removal: Removal) {
         .str("reason")
         .unwrap_or("No reason given")
         .to_owned();
-    let id = random_token(8);
-    {
-        let mut pending = ctx.app.confirmations.lock().unwrap();
-        pending.retain(|_, p| p.expires > Instant::now());
-        pending.insert(
-            id.clone(),
-            Pending {
-                removal,
-                guild_id: ctx.guild_id.clone(),
-                target: target.to_owned(),
-                reason: reason.clone(),
-                author: ctx.user_id().to_owned(),
-                expires: Instant::now() + CONFIRM_LIFETIME,
-            },
-        );
-    }
+    let id = remember(ctx, removal, target, &reason);
 
     let name = display_name(user, member);
     let consequence = match removal {
-        Removal::Ban { delete_days: 0 } => {
+        Confirmable::Ban { delete_days: 0 } => {
             "They are removed from the server and cannot join again until unbanned.".to_owned()
         }
-        Removal::Ban { delete_days } => format!(
+        Confirmable::Ban { delete_days } => format!(
             "They are removed from the server, cannot join again until unbanned, and their \
              messages of the last {delete_days} day(s) are deleted."
         ),
-        Removal::Kick => {
+        Confirmable::Kick => {
             "They are removed from the server but can join again with an invite.".into()
         }
+        Confirmable::MassRole { .. } => String::new(),
     };
     let details = format!(
         "**Member:** <@{target}>\n**Reason:** {}",
         ui::escape(&reason)
     );
-    let buttons = ui::row(vec![
-        ui::button(
-            ui::STYLE_DANGER,
-            removal.verb(),
-            &format!("confirm:yes:{id}"),
-        ),
-        ui::button(ui::STYLE_SECONDARY, "Cancel", &format!("confirm:no:{id}")),
-    ]);
+    let buttons = confirm_buttons(removal, &id);
     let msg = Msg::banner(
         Tone::Confirm,
         &format!("{} {name}?", removal.verb()),
@@ -497,19 +516,24 @@ pub async fn confirmed(ctx: &Ctx) {
         return ctx.update(Msg::denied()).await;
     }
 
+    if let Confirmable::MassRole { add, include_bots } = pending.removal {
+        return start_mass_role(ctx, &pending, add, include_bots).await;
+    }
+
     ctx.defer_update().await;
     let audit = format!("{} — by {}", pending.reason, str_of(&ctx.user, "username"));
     let (guild, target) = (&pending.guild_id, &pending.target);
     let result = match pending.removal {
-        Removal::Ban { delete_days } => {
+        Confirmable::Ban { delete_days } => {
             let body = json!({ "delete_message_seconds": delete_days * 86_400 });
             let path = format!("/guilds/{guild}/bans/{target}");
             ctx.app.api.put(&path, &body, Some(&audit)).await
         }
-        Removal::Kick => {
+        Confirmable::Kick => {
             let path = format!("/guilds/{guild}/members/{target}");
             ctx.app.api.delete(&path, Some(&audit)).await
         }
+        Confirmable::MassRole { .. } => unreachable!("handled above"),
     };
     if let Err(error) = result {
         return ctx.reply(Msg::error(&error.user_message())).await;
@@ -545,8 +569,116 @@ pub async fn unban(ctx: &Ctx, options: &Options) {
     }
 }
 
-/// `/role add` and `/role remove`.
+/// Permissions that make a role dangerous to hand out to everyone.
+const POWERFUL: u64 = (1 << 3) // administrator
+    | (1 << 1) // kick
+    | (1 << 2) // ban
+    | (1 << 4) // manage channels
+    | (1 << 5) // manage server
+    | (1 << 13) // manage messages
+    | (1 << 28) // manage roles
+    | (1 << 29) // manage webhooks
+    | (1 << 40); // moderate members
+
+/// `/role add-all` and `/role remove-all`: asks for confirmation first.
+async fn ask_mass_role(ctx: &Ctx, options: &Options, add: bool) {
+    let Some(role) = options.str("role").map(str::to_owned) else {
+        return ctx.reply(Msg::error("Pick a role.")).await;
+    };
+    if role == ctx.guild_id {
+        return ctx
+            .reply(Msg::error("Everyone already has @everyone."))
+            .await;
+    }
+    let guild = ctx.app.guild(&ctx.guild_id);
+    let permissions = guild.roles.get(&role).copied().unwrap_or(0);
+    if permissions & POWERFUL != 0 && !ctx.app.is_super_admin(&ctx.guild_id, ctx.user_id()) {
+        return ctx
+            .reply(Msg::denied_with(
+                "This role has moderation or admin permissions. Only the server owner \
+                 and the bot's owners can give it to everyone.",
+            ))
+            .await;
+    }
+    if ctx.app.mass_roles.lock().unwrap().contains(&ctx.guild_id) {
+        let text = "A role is already being given or taken on this server. Wait until it ends.";
+        return ctx.reply(Msg::warning("Busy", text).ephemeral()).await;
+    }
+
+    let include_bots = options.bool("include_bots").unwrap_or(false);
+    let removal = Confirmable::MassRole { add, include_bots };
+    let id = remember(ctx, removal, &role, "");
+    let role_name = ctx.app.role_name(&ctx.guild_id, &role);
+    let who = if include_bots {
+        "members and bots"
+    } else {
+        "members (bots excluded)"
+    };
+    let (title, consequence) = if add {
+        (
+            format!("Give {role_name} to everyone?"),
+            format!(
+                "All {who} of the server get this role. With many members it can take a while."
+            ),
+        )
+    } else {
+        (
+            format!("Take {role_name} from everyone?"),
+            format!(
+                "All {who} of the server lose this role. With many members it can take a while."
+            ),
+        )
+    };
+    let details = format!(
+        "**Role:** <@&{role}>\n**Members on the server:** {}",
+        ui::number(guild.member_count)
+    );
+    let msg = Msg::banner(
+        Tone::Confirm,
+        &title,
+        &consequence,
+        vec![
+            ui::text(details),
+            ui::separator(),
+            confirm_buttons(removal, &id),
+        ],
+    );
+    ctx.reply(msg.ephemeral()).await;
+}
+
+async fn start_mass_role(ctx: &Ctx, pending: &Pending, add: bool, include_bots: bool) {
+    // One job per server: reserved here, released when the job ends.
+    if !ctx
+        .app
+        .mass_roles
+        .lock()
+        .unwrap()
+        .insert(ctx.guild_id.clone())
+    {
+        let text = "A role is already being given or taken on this server.";
+        return ctx.update(Msg::warning("Busy", text)).await;
+    }
+    let job = massrole::Job {
+        guild_id: ctx.guild_id.clone(),
+        role_id: pending.target.clone(),
+        add,
+        include_bots,
+        channel_id: ctx.channel_id.clone(),
+        by: ctx.user_id().to_owned(),
+    };
+    let text = "Follow the progress in this channel. I will post the result when it is done.";
+    ctx.update(Msg::banner(Tone::Success, "Started", text, Vec::new()))
+        .await;
+    tokio::spawn(massrole::run(ctx.app.clone(), job));
+}
+
+/// `/role add`, `/role remove`, `/role add-all` and `/role remove-all`.
 pub async fn role(ctx: &Ctx, options: &Options) {
+    match options.sub.as_deref() {
+        Some("add-all") => return ask_mass_role(ctx, options, true).await,
+        Some("remove-all") => return ask_mass_role(ctx, options, false).await,
+        _ => {}
+    }
     let (Some(target), Some(role)) = (options.str("user"), options.str("role")) else {
         return ctx.reply(Msg::error("Pick a member and a role.")).await;
     };

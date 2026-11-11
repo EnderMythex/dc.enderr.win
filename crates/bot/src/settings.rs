@@ -865,7 +865,7 @@ pub async fn help(ctx: &Ctx) {
     if ctx.is_admin() {
         let sections = [
             "**Channels**\n`/lock` `/unlock` · stop or allow writing\n`/hide` `/unhide` · hide or show a channel\n`/lockurl` · block links",
-            "**Members**\n`/mute` `/unmute` · timeout\n`/kick` `/ban` · asks for confirmation\n`/unban`\n`/role add` `/role remove`\n`/xp add` `/xp remove` `/xp reset`",
+            "**Members**\n`/mute` `/unmute` · timeout\n`/kick` `/ban` · asks for confirmation\n`/unban`\n`/role add` `/role remove`\n`/role add-all` `/role remove-all` · every member\n`/xp add` `/xp remove` `/xp reset`",
             "**Configuration**\n`/settings view` · the settings panel\n`/settings welcome|rules|tickets|xp|logs`\n`/ownerbot add|remove|list` · bot admins",
         ];
         for section in sections {

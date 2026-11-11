@@ -46,7 +46,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Link lock | `/lockurl` | Link lock: allowed websites, exempt roles and channels |
 | Bot admins | `/ownerbot add\|remove\|list` | Admins: members and roles |
 | Sanctions | `/mute` `/unmute` `/kick` `/ban` (with confirmation) `/unban` | — |
-| Roles | `/role add\|remove` | Welcome: roles given on arrival |
+| Roles | `/role add\|remove`, `/role add-all\|remove-all` (every member, with confirmation) | Welcome: roles given on arrival |
 | Levels | `/rank` (image card) `/leaderboard` (image) `/xp add\|remove\|reset` | Levels: XP rates, announcements, role rewards |
 | Welcome | `/settings welcome`, `/settings preview` | Welcome: channel, message, image |
 | Rules + verification | `/settings rules` | Rules: text, button / captcha image / Activity, verified role, role removed once verified |

@@ -41,6 +41,8 @@ pub struct App {
     pub captchas: Mutex<HashMap<(String, String), Captcha>>,
     /// Bans and kicks waiting for the moderator to confirm, by random id.
     pub confirmations: Mutex<HashMap<String, crate::moderation::Pending>>,
+    /// Servers where a role is being given to or taken from everyone.
+    pub mass_roles: Mutex<std::collections::HashSet<String>>,
 }
 
 pub struct Identity {
@@ -141,6 +143,7 @@ impl App {
             xp_cooldowns: Mutex::default(),
             captchas: Mutex::default(),
             confirmations: Mutex::default(),
+            mass_roles: Mutex::default(),
         }
     }
 

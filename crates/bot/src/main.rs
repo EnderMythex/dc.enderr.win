@@ -10,6 +10,7 @@ mod commands;
 mod db;
 mod interactions;
 mod logs;
+mod massrole;
 mod moderation;
 mod panels;
 mod requests;
