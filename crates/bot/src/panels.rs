@@ -14,7 +14,7 @@ use serde_json::json;
 use crate::{
     app::{App, str_of},
     db::{self, Panel},
-    tickets,
+    rolepanel, tickets,
     ui::Msg,
     verify,
 };
@@ -104,6 +104,14 @@ pub async fn sync(app: &App, guild_id: &str) {
         .filter(|_| config.tickets.enabled)
         .map(|channel| (channel, tickets::panel(&config)));
     sync_one(app, guild_id, "tickets", ticket_panel).await;
+
+    let role_panel = config
+        .role_panel
+        .channel
+        .clone()
+        .filter(|_| config.role_panel.enabled && !config.role_panel.buttons.is_empty())
+        .map(|channel| (channel, rolepanel::panel(&config)));
+    sync_one(app, guild_id, "roles", role_panel).await;
 }
 
 /// Deletes a panel and posts it again at the bottom of its channel.
@@ -119,7 +127,19 @@ pub async fn repost(app: &App, guild_id: &str, kind: &str) {
 }
 
 /// Gateway payload (opcode 3) for the presence chosen on the dashboard.
-pub fn presence_payload(settings: &BotSettings) -> String {
+/// `sol_price`: the last SOL price, shown as "Watching SOL: $x".
+pub fn presence_payload(settings: &BotSettings, sol_price: Option<f64>) -> String {
+    if settings.activity_type == "sol_price" {
+        let activities = match sol_price {
+            Some(price) => vec![json!({ "type": 3, "name": crate::sol::label(price) })],
+            None => Vec::new(),
+        };
+        return json!({
+            "op": 3,
+            "d": { "since": null, "activities": activities, "status": settings.presence_status, "afk": false }
+        })
+        .to_string();
+    }
     let activity_type = match settings.activity_type.as_str() {
         "playing" => Some(0),
         "listening" => Some(2),
@@ -150,7 +170,7 @@ pub fn apply_presence(app: &App) {
         Err(error) => return tracing::warn!(%error, "unreadable settings.json"),
     };
     if let Some(sender) = app.gateway.lock().unwrap().as_ref()
-        && let Err(error) = sender.send(presence_payload(&settings))
+        && let Err(error) = sender.send(presence_payload(&settings, *app.sol_price.lock().unwrap()))
     {
         tracing::warn!(%error, "updating the presence failed");
     }
@@ -213,7 +233,8 @@ mod tests {
     #[test]
     fn presence() {
         let mut settings = BotSettings::default();
-        let idle: serde_json::Value = serde_json::from_str(&presence_payload(&settings)).unwrap();
+        let idle: serde_json::Value =
+            serde_json::from_str(&presence_payload(&settings, None)).unwrap();
         assert_eq!(idle["op"], 3);
         assert_eq!(idle["d"]["status"], "online");
         assert_eq!(idle["d"]["activities"], json!([]));
@@ -221,9 +242,16 @@ mod tests {
         settings.presence_status = "dnd".into();
         settings.activity_type = "watching".into();
         settings.activity_text = "the server".into();
-        let busy: serde_json::Value = serde_json::from_str(&presence_payload(&settings)).unwrap();
+        let busy: serde_json::Value =
+            serde_json::from_str(&presence_payload(&settings, None)).unwrap();
         assert_eq!(busy["d"]["status"], "dnd");
         assert_eq!(busy["d"]["activities"][0]["type"], 3);
         assert_eq!(busy["d"]["activities"][0]["name"], "the server");
+
+        settings.activity_type = "sol_price".into();
+        let sol: serde_json::Value =
+            serde_json::from_str(&presence_payload(&settings, Some(150.5))).unwrap();
+        assert_eq!(sol["d"]["activities"][0]["name"], "SOL: $150.50");
+        assert_eq!(sol["d"]["activities"][0]["type"], 3);
     }
 }

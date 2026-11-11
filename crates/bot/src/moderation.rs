@@ -22,7 +22,6 @@ const WRITE: u64 = SEND_MESSAGES | SEND_IN_THREADS | CREATE_PUBLIC_THREADS | CRE
 
 /// Discord's maximum timeout.
 const MAX_MUTE_SECS: i64 = 28 * 86_400;
-const NOTICE_LIFETIME: Duration = Duration::from_secs(6);
 /// How long a ban or kick waits for the moderator's confirmation.
 const CONFIRM_LIFETIME: Duration = Duration::from_secs(120);
 
@@ -787,56 +786,10 @@ pub fn blocked_link(content: &str, allowed: &[String]) -> Option<String> {
         })
 }
 
-/// Deletes the message if it has a link its author may not post. Returns
-/// true when the message was removed.
-pub async fn filter_links(app: &App, guild_id: &str, message: &Value) -> bool {
-    let config = app.config(guild_id);
-    let filter = &config.lock_url;
-    let channel_id = str_of(message, "channel_id");
-    if !filter.enabled || filter.exempt_channels.iter().any(|id| id == channel_id) {
-        return false;
-    }
-    let Some(domain) = blocked_link(str_of(message, "content"), &filter.allowed_domains) else {
-        return false;
-    };
-    let author = str_of(&message["author"], "id");
-    let roles = roles_of(&message["member"]);
-    if filter.exempt_roles.iter().any(|role| roles.contains(role))
-        || app.is_admin(guild_id, author, &roles)
-    {
-        return false;
-    }
-
-    if let Err(error) = app
-        .api
-        .delete_message(channel_id, str_of(message, "id"))
-        .await
-    {
-        tracing::warn!(guild = guild_id, %error, "deleting a link failed");
-        return false;
-    }
-    let notice = Msg::notice(
-        ui::AMBER,
-        "Links are not allowed here",
-        &format!("<@{author}>, your message was removed because it contained a link."),
-    )
-    .ping(author);
-    // The notice is only useful for a few seconds: clean it up afterwards.
-    if let Ok(sent) = app.api.send_message(channel_id, &notice).await {
-        let (api, channel, id) = (
-            app.api.clone(),
-            channel_id.to_owned(),
-            str_of(&sent, "id").to_owned(),
-        );
-        tokio::spawn(async move {
-            tokio::time::sleep(NOTICE_LIFETIME).await;
-            let _ = api.delete_message(&channel, &id).await;
-        });
-    }
-    let entry =
-        format!("**Author:** <@{author}>\n**Channel:** <#{channel_id}>\n**Domain:** `{domain}`");
-    logs::moderation(app, guild_id, "Link removed", &entry).await;
-    true
+/// May members give themselves this role (role panel)? Never a role with
+/// moderation or admin permissions, whatever the configuration says.
+pub fn may_be_self_assigned(app: &App, guild_id: &str, role: &str) -> bool {
+    role != guild_id && app.guild(guild_id).roles.get(role).copied().unwrap_or(0) & POWERFUL == 0
 }
 
 #[cfg(test)]

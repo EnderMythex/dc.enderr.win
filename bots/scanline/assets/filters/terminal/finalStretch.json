@@ -1,0 +1,32 @@
+{
+    "HIDE_MAYHEM": true,
+    "TOP INSIDER HOLDING PCNT": {
+        "to": 25,
+        "from": null
+    },
+    "SNIPERS HOLDINGS PCNT": {
+        "from": null,
+        "to": 20
+    },
+    "MARKET CAP": {
+        "to": null,
+        "from": 4100
+    },
+    "TOKEN AGE IN SECONDS": {
+        "to": 30,
+        "from": null
+    },
+    "PERCENTAGE DEV HOLDING": {
+        "to": 11,
+        "from": null
+    },
+    "LAUNCHPADS": [
+        "bonk",
+        "meteora-curve",
+        "pumpfun"
+    ],
+    "TOTAL_SOL_FEES": {
+        "from": 0.35,
+        "to": null
+    }
+}

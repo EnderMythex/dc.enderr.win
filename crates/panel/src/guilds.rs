@@ -34,13 +34,26 @@ pub const MODULES: &[(&str, &str)] = &[
     ("levels", "Levels"),
     ("logs", "Logs"),
     ("links", "Link lock"),
+    ("security", "Anti-scam"),
+    ("roles", "Role panel"),
+    ("assistant", "AI assistant"),
+    ("twitch", "Twitch"),
+    ("reminders", "Safety reminders"),
 ];
 
 /// Extra page next to the sections: reset of the whole server.
 pub const DANGER: &str = "danger";
 
 /// Sections whose output can be sent to Discord as a test.
-const TESTABLE: &[&str] = &["welcome", "rules", "tickets", "levels", "logs"];
+const TESTABLE: &[&str] = &[
+    "welcome",
+    "rules",
+    "tickets",
+    "levels",
+    "logs",
+    "roles",
+    "reminders",
+];
 
 /// Checks access and loads everything a server page needs. 404 when the bot
 /// is not on that server, so ids cannot be probed.
@@ -116,6 +129,29 @@ pub struct GuildForm {
     remove_role: String,
     captcha_style: String,
     ping_seconds: String,
+    dm_enabled: Option<String>,
+    dm_text: String,
+    dm_text_en: String,
+    dm_safety: Option<String>,
+    dm_links: String,
+    scope: String,
+    listed_channels: Vec<String>,
+    x_channels: Vec<String>,
+    review_channel: String,
+    timeout: String,
+    invites: Option<String>,
+    insider: Option<String>,
+    images: Option<String>,
+    button_role: Vec<String>,
+    button_label: Vec<String>,
+    button_emoji: Vec<String>,
+    button_description: Vec<String>,
+    context: String,
+    max_length: String,
+    logins: String,
+    channel_fr: String,
+    channel_en: String,
+    interval: String,
     title: String,
     text: String,
     image: Option<String>,
@@ -177,6 +213,14 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.welcome.auto_roles = form.roles;
             config.welcome.ping_channels = form.channels;
             config.welcome.ping_seconds = number(&form.ping_seconds, 3);
+            config.welcome.dm_enabled = form.dm_enabled.is_some();
+            config.welcome.dm_text = form.dm_text;
+            config.welcome.dm_text_en = form.dm_text_en;
+            config.welcome.dm_safety = form.dm_safety.is_some();
+            config.welcome.dm_links = lines(&form.dm_links)
+                .iter()
+                .filter_map(|line| dc_core::guild::parse_link_button(line))
+                .collect();
         }
         "rules" => {
             config.rules.enabled = enabled;
@@ -234,6 +278,59 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.lock_url.exempt_roles = form.roles;
             config.lock_url.exempt_channels = form.channels;
             config.lock_url.allowed_domains = lines(&form.domains);
+            config.lock_url.scope = form.scope;
+            config.lock_url.channels = form.listed_channels;
+            config.lock_url.x_blocked_channels = form.x_channels;
+            config.lock_url.review_channel = optional(form.review_channel);
+            config.lock_url.timeout_secs = number(&form.timeout, 0);
+        }
+        "security" => {
+            config.anti_scam.invites = form.invites.is_some();
+            config.anti_scam.insider = form.insider.is_some();
+            config.anti_scam.images = form.images.is_some();
+            config.anti_scam.staff_channel = optional(form.channel);
+        }
+        "roles" => {
+            config.role_panel.enabled = enabled;
+            config.role_panel.channel = optional(form.channel);
+            config.role_panel.title = form.title;
+            let field =
+                |list: &[String], index: usize| list.get(index).cloned().unwrap_or_default();
+            config.role_panel.buttons = (0..form.button_role.len())
+                .filter_map(|index| {
+                    let role = field(&form.button_role, index);
+                    let label = field(&form.button_label, index);
+                    (!role.is_empty()).then(|| dc_core::guild::RoleButton {
+                        label: if label.trim().is_empty() {
+                            "Role".into()
+                        } else {
+                            label
+                        },
+                        role,
+                        emoji: field(&form.button_emoji, index),
+                        description: field(&form.button_description, index),
+                    })
+                })
+                .collect();
+        }
+        "assistant" => {
+            config.assistant.enabled = enabled;
+            config.assistant.context = form.context;
+            config.assistant.channels = form.channels;
+            config.assistant.max_length = number(&form.max_length, 600);
+            config.assistant.cooldown_secs = number(&form.cooldown, 8);
+        }
+        "twitch" => {
+            config.twitch.enabled = enabled;
+            config.twitch.channel = optional(form.channel);
+            config.twitch.role = optional(form.role);
+            config.twitch.logins = lines(&form.logins);
+        }
+        "reminders" => {
+            config.reminders.enabled = enabled;
+            config.reminders.channel_fr = optional(form.channel_fr);
+            config.reminders.channel_en = optional(form.channel_en);
+            config.reminders.interval_hours = number(&form.interval, 48);
         }
         _ => {}
     }
@@ -470,6 +567,64 @@ mod tests {
         assert_eq!(config.rules.verified_role.as_deref(), Some(ROLE));
         assert_eq!(config.rules.remove_role.as_deref(), Some(other));
         assert_eq!(config.rules.captcha_style, "slide");
+    }
+
+    #[test]
+    fn scanline_sections() {
+        let config = saved(
+            "roles",
+            GuildForm {
+                enabled: Some("on".into()),
+                channel: CHANNEL.into(),
+                title: "Roles".into(),
+                button_role: vec![ROLE.into(), "".into()],
+                button_label: vec!["FR".into(), "skipped".into()],
+                button_emoji: vec!["🇫🇷".into(), "".into()],
+                button_description: vec!["".into(), "".into()],
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.role_panel.buttons.len(), 1);
+        assert_eq!(config.role_panel.buttons[0].label, "FR");
+
+        let config = saved(
+            "links",
+            GuildForm {
+                enabled: Some("on".into()),
+                scope: "listed".into(),
+                listed_channels: vec![CHANNEL.into()],
+                x_channels: vec![CHANNEL.into()],
+                review_channel: CHANNEL.into(),
+                timeout: "60".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.lock_url.scope, "listed");
+        assert_eq!(config.lock_url.timeout_secs, 60);
+        assert_eq!(config.lock_url.review_channel.as_deref(), Some(CHANNEL));
+
+        let config = saved(
+            "welcome",
+            GuildForm {
+                dm_enabled: Some("on".into()),
+                dm_links:
+                    "Axiom | https://axiom.trade/@x\nbad line\nFomo | https://fomo.family/r/x"
+                        .into(),
+                ..Default::default()
+            },
+        );
+        assert!(config.welcome.dm_enabled && !config.welcome.dm_safety);
+        assert_eq!(config.welcome.dm_links.len(), 2);
+
+        let config = saved(
+            "twitch",
+            GuildForm {
+                enabled: Some("on".into()),
+                logins: "dh_trenches\nJunkoCry\n".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.twitch.logins, vec!["dh_trenches", "junkocry"]);
     }
 
     #[test]

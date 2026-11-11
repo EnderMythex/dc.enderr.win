@@ -5,19 +5,30 @@
 //! written by the dashboard and the bot's own data.
 
 mod announce;
+mod antiscam;
 mod api;
 mod app;
+mod assistant;
 mod commands;
 mod db;
+mod gemini;
 mod giveaway;
 mod interactions;
+mod lang;
+mod linkguard;
 mod logs;
 mod massrole;
+mod members;
 mod moderation;
 mod panels;
+mod reminders;
 mod requests;
+mod rolepanel;
+mod scanline;
 mod settings;
+mod sol;
 mod tickets;
+mod twitch;
 mod ui;
 mod verify;
 mod welcome;
@@ -89,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         dir,
         def.owners.clone(),
-        (def.name.clone(), def.slug.clone()),
+        (def.name.clone(), def.slug.clone(), def.packs.clone()),
         dashboard_url,
     ));
     ui::set_bot_name(&def.name);
@@ -97,6 +108,9 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(panels::watch(app.clone()));
     tokio::spawn(requests::watch(app.clone()));
     tokio::spawn(giveaway::watch(app.clone()));
+    tokio::spawn(twitch::watch(app.clone()));
+    tokio::spawn(reminders::watch(app.clone()));
+    tokio::spawn(sol::watch(app.clone()));
 
     // Privileged intents must be enabled on the Developer Portal. Without
     // them Discord closes the connection: fall back to what is allowed.
@@ -153,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
 /// by Discord: it must be sent back, or Discord refuses the whole update.
 async fn register_commands(app: &App) {
     let path = format!("/applications/{}/commands", app.app_id());
-    let mut list = commands::all();
+    let mut list = commands::for_bot(&app.packs);
     match app.api.get(&path).await {
         Ok(existing) => {
             let entry_points = existing.as_array().into_iter().flatten();
@@ -342,9 +356,13 @@ async fn dispatch(app: &Arc<App>, kind: &str, d: Value) {
             if !from_bot {
                 let app = app.clone();
                 tokio::spawn(async move {
-                    if !moderation::filter_links(&app, &guild_id, &d).await {
-                        xp::on_message(&app, &guild_id, &d).await;
+                    if antiscam::check(&app, &guild_id, &d, false).await
+                        || linkguard::filter_links(&app, &guild_id, &d).await
+                    {
+                        return;
                     }
+                    xp::on_message(&app, &guild_id, &d).await;
+                    assistant::on_message(&app, &guild_id, &d).await;
                 });
             }
         }
@@ -371,9 +389,13 @@ async fn dispatch(app: &Arc<App>, kind: &str, d: Value) {
             };
             let app = app.clone();
             tokio::spawn(async move {
-                if !moderation::filter_links(&app, &guild_id, &d).await {
-                    logs::message_edited(&app, &guild_id, &d, &before, &content).await;
+                // Otherwise a link could be added by editing a harmless message.
+                if antiscam::check(&app, &guild_id, &d, true).await
+                    || linkguard::filter_links(&app, &guild_id, &d).await
+                {
+                    return;
                 }
+                logs::message_edited(&app, &guild_id, &d, &before, &content).await;
             });
         }
         "MESSAGE_DELETE" if !guild_id.is_empty() => {

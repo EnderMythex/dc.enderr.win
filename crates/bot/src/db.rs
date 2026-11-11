@@ -72,6 +72,13 @@ pub async fn init(db: &SqlitePool) -> Result<(), sqlx::Error> {
             user_id  TEXT NOT NULL,
             PRIMARY KEY (guild_id, number, user_id)
         )",
+        "CREATE TABLE IF NOT EXISTS link_reviews (
+            id         TEXT PRIMARY KEY,
+            guild_id   TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            content    TEXT NOT NULL
+        )",
         "CREATE TABLE IF NOT EXISTS panels (
             guild_id   TEXT NOT NULL,
             kind       TEXT NOT NULL,
@@ -330,6 +337,27 @@ mod tests {
             .unwrap();
         init(&db).await.unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn link_reviews_and_counters() {
+        let db = memory().await;
+        let review = LinkReview {
+            id: "r1".into(),
+            guild_id: "g".into(),
+            user_id: "u".into(),
+            channel_id: "c".into(),
+            content: "https://site.example".into(),
+        };
+        save_link_review(&db, &review).await.unwrap();
+        assert_eq!(take_link_review(&db, "r1").await.unwrap(), Some(review));
+        // Taken once only.
+        assert_eq!(take_link_review(&db, "r1").await.unwrap(), None);
+
+        assert_eq!(get_counter(&db, "g", "reminder").await.unwrap(), 0);
+        set_counter(&db, "g", "reminder", 42).await.unwrap();
+        set_counter(&db, "g", "reminder", 43).await.unwrap();
+        assert_eq!(get_counter(&db, "g", "reminder").await.unwrap(), 43);
     }
 
     #[tokio::test]
@@ -662,4 +690,75 @@ pub async fn count_entries(db: &SqlitePool, guild: &str, number: i64) -> Result<
         .bind(number)
         .fetch_one(db)
         .await
+}
+
+// ---------------------------------------------------------------- link reviews
+
+/// A link a member sent to the staff, waiting for Accept or Refuse.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct LinkReview {
+    pub id: String,
+    pub guild_id: String,
+    pub user_id: String,
+    pub channel_id: String,
+    pub content: String,
+}
+
+pub async fn save_link_review(db: &SqlitePool, review: &LinkReview) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO link_reviews (id, guild_id, user_id, channel_id, content)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&review.id)
+    .bind(&review.guild_id)
+    .bind(&review.user_id)
+    .bind(&review.channel_id)
+    .bind(&review.content)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Takes a review out (so two staff clicks cannot both act on it).
+pub async fn take_link_review(
+    db: &SqlitePool,
+    id: &str,
+) -> Result<Option<LinkReview>, sqlx::Error> {
+    sqlx::query_as(
+        "DELETE FROM link_reviews WHERE id = ?
+         RETURNING id, guild_id, user_id, channel_id, content",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await
+}
+
+// ---------------------------------------------------------------- counters
+
+pub async fn get_counter(db: &SqlitePool, guild: &str, name: &str) -> Result<i64, sqlx::Error> {
+    let value: Option<i64> =
+        sqlx::query_scalar("SELECT value FROM counters WHERE guild_id = ? AND name = ?")
+            .bind(guild)
+            .bind(name)
+            .fetch_optional(db)
+            .await?;
+    Ok(value.unwrap_or(0))
+}
+
+pub async fn set_counter(
+    db: &SqlitePool,
+    guild: &str,
+    name: &str,
+    value: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO counters (guild_id, name, value) VALUES (?, ?, ?)
+         ON CONFLICT (guild_id, name) DO UPDATE SET value = excluded.value",
+    )
+    .bind(guild)
+    .bind(name)
+    .bind(value)
+    .execute(db)
+    .await?;
+    Ok(())
 }

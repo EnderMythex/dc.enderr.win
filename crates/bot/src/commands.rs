@@ -57,6 +57,15 @@ fn user_and_reason(what: &str) -> Vec<Value> {
     ]
 }
 
+/// Every command of a bot: the common ones and those of its packs.
+pub fn for_bot(packs: &[String]) -> Vec<Value> {
+    let mut commands = all();
+    if packs.iter().any(|pack| pack == crate::scanline::PACK) {
+        commands.extend(crate::scanline::commands());
+    }
+    commands
+}
+
 pub fn all() -> Vec<Value> {
     let target_channel = || channel("channel", "Channel (defaults to this one)", &TEXT_CHANNELS);
     let enabled = || option(BOOLEAN, "enabled", "Turn the module on or off", false);
@@ -429,6 +438,16 @@ pub fn all() -> Vec<Value> {
                 }),
             ],
         ),
+        command(
+            "stats",
+            "Member arrivals: today, this month, and the trend",
+            vec![],
+        ),
+        command(
+            "missing-role",
+            "List the members who do not have a role",
+            vec![option(ROLE, "role", "Role to look for", true)],
+        ),
         command("help", "List the bot's commands", vec![]),
     ]
 }
@@ -462,7 +481,7 @@ mod tests {
                 }
             }
         }
-        let commands = all();
+        let commands = for_bot(&["scanline".to_owned()]);
         let mut names: Vec<&str> = commands
             .iter()
             .map(|c| c["name"].as_str().unwrap())

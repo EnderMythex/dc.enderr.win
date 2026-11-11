@@ -31,6 +31,18 @@ pub struct App {
     pub name: String,
     /// The bot's folder name, its id on the panel.
     pub slug: String,
+    /// Extra content of the bot (`packs` in `bot.toml`).
+    pub packs: Vec<String>,
+    pub gemini: crate::gemini::Gemini,
+    pub anti_scam: crate::antiscam::Memory,
+    /// Last question of each member to the AI assistant.
+    pub assistant_cooldowns: Mutex<HashMap<(String, String), Instant>>,
+    /// The assistant answers one question at a time.
+    pub assistant_queue: tokio::sync::Mutex<()>,
+    /// Removed links their authors may still send to the staff.
+    pub pending_links: Mutex<HashMap<String, crate::linkguard::Pending>>,
+    /// Last SOL price, for the activity.
+    pub sol_price: Mutex<Option<f64>>,
     /// Link to this bot's page on the dashboard, when configured.
     pub dashboard_url: Option<String>,
     /// Bot user id and application id, known once connected.
@@ -134,17 +146,26 @@ impl App {
         db: SqlitePool,
         dir: PathBuf,
         owners: Vec<String>,
-        (name, slug): (String, String),
+        (name, slug, packs): (String, String, Vec<String>),
         dashboard_url: Option<String>,
     ) -> Self {
+        let web = reqwest::Client::new();
+        let gemini = crate::gemini::Gemini::from_env(web.clone(), &dir);
         Self {
             api,
-            web: reqwest::Client::new(),
+            web,
             db,
             dir,
             owners,
             name,
             slug,
+            packs,
+            gemini,
+            anti_scam: Default::default(),
+            assistant_cooldowns: Mutex::default(),
+            assistant_queue: tokio::sync::Mutex::new(()),
+            pending_links: Mutex::default(),
+            sol_price: Mutex::default(),
             dashboard_url,
             identity: OnceLock::new(),
             gateway: Mutex::default(),
@@ -301,6 +322,28 @@ impl App {
             });
         }
         take_slot(all.entry(user_id.to_owned()).or_default(), now, max, window)
+    }
+
+    /// Staff for the automatic checks: bot admins, and members whose roles
+    /// can manage the server, kick or manage messages. Never sanctioned.
+    pub fn is_staff(&self, guild_id: &str, user_id: &str, roles: &[String]) -> bool {
+        const STAFF: u64 = (1 << 3) | (1 << 5) | (1 << 1) | (1 << 13);
+        if self.is_admin(guild_id, user_id, roles) {
+            return true;
+        }
+        let guilds = self.guilds.lock().unwrap();
+        let Some(guild) = guilds.get(guild_id) else {
+            // Not cached yet (just started): better let a message through
+            // than sanction someone by mistake.
+            return true;
+        };
+        let permissions = roles
+            .iter()
+            .map(String::as_str)
+            .chain([guild_id])
+            .filter_map(|role| guild.roles.get(role))
+            .fold(0, |acc, bits| acc | bits);
+        permissions & STAFF != 0
     }
 
     /// Server owner or panel owner of this bot: may manage the admin list.

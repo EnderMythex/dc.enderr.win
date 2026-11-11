@@ -13,12 +13,12 @@ use reqwest::Method;
 use serde_json::{Value, json};
 
 use crate::{
-    announce,
+    announce, antiscam,
     api::ApiResult,
     app::{App, bits_of, roles_of, str_of},
-    giveaway, moderation, settings, tickets,
+    giveaway, linkguard, members, moderation, rolepanel, scanline, settings, tickets,
     ui::Msg,
-    verify, xp,
+    verify, welcome, xp,
 };
 
 const PERM_ADMINISTRATOR: u64 = 1 << 3;
@@ -38,12 +38,19 @@ pub struct Ctx {
     pub member: Value,
     /// Command name and options, or the component's `custom_id` and values.
     pub data: Value,
+    /// Language of the member's Discord client (`fr`, `en-US`...).
+    pub locale: String,
     deferred: AtomicBool,
 }
 
 impl Ctx {
     pub fn user_id(&self) -> &str {
         str_of(&self.user, "id")
+    }
+
+    /// French or English, from the member's Discord client.
+    pub fn lang(&self) -> crate::lang::Lang {
+        crate::lang::Lang::from_locale(&self.locale)
     }
 
     pub fn config(&self) -> Arc<GuildConfig> {
@@ -243,18 +250,34 @@ impl Options {
 pub async fn handle(app: Arc<App>, interaction: Value) {
     let kind = interaction["type"].as_u64().unwrap_or(0);
     let member = interaction["member"].clone();
+    // In private messages there is no member, only the user.
+    let user = if member.is_null() {
+        interaction["user"].clone()
+    } else {
+        member["user"].clone()
+    };
     let ctx = Ctx {
         app,
         id: str_of(&interaction, "id").to_owned(),
         token: str_of(&interaction, "token").to_owned(),
         guild_id: str_of(&interaction, "guild_id").to_owned(),
         channel_id: str_of(&interaction["channel"], "id").to_owned(),
-        user: member["user"].clone(),
+        user,
         member,
         data: interaction["data"].clone(),
+        locale: str_of(&interaction, "locale").to_owned(),
         deferred: AtomicBool::new(false),
     };
     if ctx.guild_id.is_empty() {
+        // Two buttons are sent in private messages: they find their server
+        // themselves.
+        let id = ctx.custom_id();
+        if kind == 3 && id.starts_with(linkguard::SUBMIT_PREFIX) {
+            return linkguard::submit(&ctx).await;
+        }
+        if kind == 3 && id.starts_with(welcome::LANG_PREFIX) {
+            return welcome::switch_language(&ctx).await;
+        }
         ctx.reply(Msg::error("This bot only works inside a server."))
             .await;
         return;
@@ -290,6 +313,11 @@ async fn command(ctx: &Ctx) {
         "rank" => return xp::rank(ctx, &options).await,
         "leaderboard" => return xp::leaderboard(ctx).await,
         "help" => return settings::help(ctx).await,
+        "filters" | "tools" | "tuto-terminal" | "wallet-tracker"
+            if ctx.app.packs.iter().any(|pack| pack == scanline::PACK) =>
+        {
+            return scanline::command(ctx, name).await;
+        }
         _ => {}
     }
 
@@ -311,6 +339,8 @@ async fn command(ctx: &Ctx) {
         "role" => moderation::role(ctx, &options).await,
         "xp" => xp::manage(ctx, &options).await,
         "giveaway" => giveaway::command(ctx, &options).await,
+        "stats" => members::stats(ctx).await,
+        "missing-role" => members::missing_role(ctx, &options).await,
         "announce" => announce::announce(ctx, &options).await,
         "maintenance" => announce::maintenance(ctx, &options).await,
         "settings" => settings::command(ctx, &options).await,
@@ -328,6 +358,24 @@ async fn component(ctx: &Ctx) {
     }
     if id.starts_with("giveaway:") {
         return giveaway::component(ctx).await;
+    }
+    if id.starts_with(rolepanel::PREFIX) {
+        return rolepanel::toggle(ctx).await;
+    }
+    if id.starts_with(verify::COLOR_PREFIX) {
+        return verify::check_color(ctx).await;
+    }
+    if id.starts_with(scanline::FILTER_PREFIX) {
+        return scanline::filter_choice(ctx).await;
+    }
+    if id.starts_with(linkguard::SUBMIT_PREFIX) {
+        return linkguard::submit(ctx).await;
+    }
+    if id.starts_with(linkguard::REVIEW_PREFIX) {
+        return linkguard::review(ctx).await;
+    }
+    if id.starts_with(antiscam::UNBAN_PREFIX) {
+        return antiscam::unban(ctx).await;
     }
     match id {
         "verify:start" => verify::start(ctx).await,

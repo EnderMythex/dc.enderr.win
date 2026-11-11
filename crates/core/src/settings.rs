@@ -15,6 +15,8 @@ pub const ACTIVITY_TYPES: &[&str] = &[
     "listening",
     "competing",
     "custom",
+    // "Watching SOL: $123.45", refreshed every 10 minutes by the bot.
+    "sol_price",
 ];
 
 pub const ACTIVITY_TEXT_MAX_CHARS: usize = 128;

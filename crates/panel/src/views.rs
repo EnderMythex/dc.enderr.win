@@ -149,6 +149,7 @@ fn activity_label(value: &str) -> &'static str {
         "listening" => "Listening to…",
         "competing" => "Competing in…",
         "custom" => "Custom status",
+        "sol_price" => "SOL price (Watching SOL: $…)",
         _ => "—",
     }
 }
@@ -903,7 +904,26 @@ fn choice(name: &str, label: &str, hint: &str, options: &[(&str, &str)], current
 }
 
 /// The form fields of one section of a server's configuration.
-fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> Markup {
+/// Is a secret configured for this bot (`.env` or `KEY_<SLUG>`)?
+fn has_secret(bot: &BotView, key: &str) -> bool {
+    dc_core::registry::read_env(&bot.def.dir, key).is_some()
+}
+
+fn missing_secret(what: &str, keys: &str) -> Markup {
+    html! {
+        div.notice.warn role="status" {
+            (what) " needs " code { (keys) } " in the bot's settings on the server (Coolify "
+            "environment variables). Until then it stays off, even when enabled here."
+        }
+    }
+}
+
+fn guild_fields(
+    module: &str,
+    bot: &BotView,
+    context: &GuildContext,
+    config: &GuildConfig,
+) -> Markup {
     let text_channels = || context.channels.iter().filter(|c| c.is_text());
     let categories = || context.channels.iter().filter(|c| c.is_category());
     let roles = &context.roles;
@@ -939,6 +959,12 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
                 (checks("roles", "Roles given on arrival", "The bot's role must be above these roles.", &role_items, &welcome.auto_roles))
                 (checks("channels", "Mention new members in these channels", "Optional, up to 10. The bot mentions each new member in every channel ticked here, then deletes the mention after a few seconds: the channels light up for them without leaving messages behind. Works even if the welcome message is off.", &channel_items, &welcome.ping_channels))
                 (number_input("ping_seconds", "Delete the mentions after (seconds)", "", welcome.ping_seconds, 1, 60))
+                h2.section-title { "Private message" }
+                (switch("dm_enabled", "Send a private message to new members", "Members who do not accept DMs simply do not get it. Works even if the welcome message is off.", welcome.dm_enabled))
+                (textarea("dm_text", "Message", "Placeholders: {user}, {server}. Discord formatting works.", &welcome.dm_text, 5, 1800))
+                (textarea("dm_text_en", "English version (optional)", "When filled in, the message gets a language button to switch between the two.", &welcome.dm_text_en, 5, 1800))
+                (switch("dm_safety", "Add the anti-scam tips", "Staff never DMs first, never share your seed phrase, and how to turn off DMs (with a picture).", welcome.dm_safety))
+                (textarea("dm_links", "Link buttons", "Up to 3, one per line: Label | https://link", &welcome.dm_links.iter().map(|l| format!("{} | {}", l.label, l.url)).collect::<Vec<_>>().join("\n"), 3, 1200))
             }
         }
         "rules" => {
@@ -946,6 +972,7 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
             let modes = [
                 ("none", "None — rules only"),
                 ("button", "Button — one click to accept"),
+                ("colors", "Colors — click the button of the right color"),
                 ("captcha", "Captcha — type the code from an image"),
                 ("activity", "Activity — captcha in a Discord Activity"),
                 ("web", "Website — captcha on a page of this site, by link"),
@@ -1037,14 +1064,110 @@ fn guild_fields(module: &str, context: &GuildContext, config: &GuildConfig) -> M
                 (switch("log_moderation", "Moderation", "Mutes, kicks, bans, locks and setting changes made with the bot.", logs.moderation))
             }
         }
+        "security" => {
+            let rules = &config.anti_scam;
+            html! {
+                h2 { "Anti-scam" }
+                p.muted { "Automatic checks on every message. Bot admins and members who can manage messages, kick or manage the server are never affected." }
+                (switch("invites", "Block Discord invites", "Even disguised ones (line breaks, look-alike dots, invisible characters). The message is deleted and its author kicked (1 hour timeout if the kick fails).", rules.invites))
+                (switch("insider", "Block the \"insider\" scam pitch", "The recurring \"new to crypto? join an insider, text me\" message, even reworded. Deleted, author banned.", rules.insider))
+                (switch("images", "Check pictures with AI", "Recruiting ads such as \"I make 10 people rich, DM me on Telegram\" are deleted and their author banned. A ban needs both a promise of gains and an invitation to get in touch, written in the picture.", rules.images))
+                @if rules.images && !has_secret(bot, "GEMINI_API_KEY") {
+                    (missing_secret("Checking pictures", &format!("GEMINI_API_KEY_{}", bot.def.slug.to_uppercase().replace('-', "_"))))
+                }
+                (channel_select("channel", "Staff channel", "Scam pictures are reposted here with an Unban button, and failed sanctions are reported. Keep it private.", text_channels(), &rules.staff_channel))
+                p.hint { "A ban falls back to a kick, then to a 28 day timeout, when Discord refuses it." }
+            }
+        }
+        "roles" => {
+            let panel = &config.role_panel;
+            let rows = (panel.buttons.len() + 1).clamp(5, dc_core::guild::MAX_ROLE_BUTTONS);
+            html! {
+                h2 { "Role panel" }
+                (switch("enabled", "Post the role panel", "Members click a button to take or drop a role. The bot posts the panel and keeps it up to date.", panel.enabled))
+                (channel_select("channel", "Panel channel", "", text_channels(), &panel.channel))
+                (field("title", "Title", "", html! {
+                    input #title type="text" name="title" value=(panel.title) maxlength="80" required;
+                }))
+                fieldset.checks {
+                    legend { "Buttons" }
+                    p.hint { "Up to 10. Roles with moderation or admin permissions are never given, and the bot's role must be above these roles. Leave the role empty to skip a row." }
+                    @for index in 0..rows {
+                        @let button = panel.buttons.get(index);
+                        div.role-row {
+                            select name="button_role" aria-label="Role" {
+                                (role_options(roles, button.map(|b| b.role.as_str())))
+                            }
+                            input type="text" name="button_label" placeholder="Label" maxlength="80" aria-label="Label"
+                                value=[button.map(|b| b.label.as_str())];
+                            input type="text" name="button_emoji" placeholder="Emoji" maxlength="8" aria-label="Emoji"
+                                value=[button.map(|b| b.emoji.as_str())];
+                            input type="text" name="button_description" placeholder="Description (optional)" maxlength="200"
+                                aria-label="Description" value=[button.map(|b| b.description.as_str())];
+                        }
+                    }
+                }
+            }
+        }
+        "assistant" => {
+            let assistant = &config.assistant;
+            html! {
+                h2 { "AI assistant" }
+                (switch("enabled", "Answer members who mention the bot", "Short answers (1 to 3 sentences) in the language of the question, powered by Gemini.", assistant.enabled))
+                @if !has_secret(bot, "GEMINI_API_KEY") {
+                    (missing_secret("The assistant", &format!("GEMINI_API_KEY_{}", bot.def.slug.to_uppercase().replace('-', "_"))))
+                }
+                (textarea("context", "What the assistant knows", "Examples of questions and answers, facts about the server, links it may give, rules to follow. Empty: the bot's default knowledge.", &assistant.context, 12, 12000))
+                (checks("channels", "Channels where it answers", "None ticked: everywhere.", &channel_items, &assistant.channels))
+                div.field-row {
+                    (number_input("max_length", "Longest question (characters)", "", assistant.max_length, 50, 2000))
+                    (number_input("cooldown", "Seconds between two questions of a member", "", assistant.cooldown_secs, 1, 600))
+                }
+            }
+        }
+        "twitch" => {
+            let twitch = &config.twitch;
+            html! {
+                h2 { "Twitch alerts" }
+                (switch("enabled", "Announce when streamers go live", "Checked every minute.", twitch.enabled))
+                @if !has_secret(bot, "TWITCH_CLIENT_ID") || !has_secret(bot, "TWITCH_CLIENT_SECRET") {
+                    @let slug = bot.def.slug.to_uppercase().replace('-', "_");
+                    (missing_secret("Twitch alerts", &format!("TWITCH_CLIENT_ID_{slug} and TWITCH_CLIENT_SECRET_{slug}")))
+                }
+                (channel_select("channel", "Alert channel", "", text_channels(), &twitch.channel))
+                (field("role", "Role mentioned", "Optional, e.g. a \"Twitch alerts\" role members can take in the role panel.", html! {
+                    select #role name="role" { (role_options(roles, twitch.role.as_deref())) }
+                }))
+                (textarea("logins", "Streamers", "Twitch user names, one per line (10 at most), e.g. dh_trenches.", &twitch.logins.join("\n"), 4, 400))
+            }
+        }
+        "reminders" => {
+            let reminders = &config.reminders;
+            html! {
+                h2 { "Safety reminders" }
+                (switch("enabled", "Post an anti-scam reminder regularly", "Staff never DMs first, never share your seed phrase, how to turn off DMs.", reminders.enabled))
+                (channel_select("channel_fr", "French channel", "", text_channels(), &reminders.channel_fr))
+                (channel_select("channel_en", "English channel", "", text_channels(), &reminders.channel_en))
+                (number_input("interval", "Every (hours)", "", reminders.interval_hours, 6, 336))
+            }
+        }
         _ => {
             let links = &config.lock_url;
+            let scopes = [
+                ("all", "Every channel, except the exempt ones below"),
+                ("listed", "Only the channels listed below"),
+            ];
             html! {
                 h2 { "Link lock" }
-                (switch("enabled", "Block links", "Messages with a link are deleted. Bot admins are never affected. Same as the /lockurl command.", links.enabled))
-                (textarea("domains", "Allowed websites", "One domain per line, for example youtube.com. Their subdomains are allowed too.", &links.allowed_domains.join("\n"), 4, 2000))
+                (switch("enabled", "Block links", "Messages with a link are deleted. Bot admins and staff are never affected. Same as the /lockurl command.", links.enabled))
+                (choice("scope", "Where", "", &scopes, &links.scope))
+                (checks("listed_channels", "Watched channels", "Used when \"Only the channels listed\" is chosen.", &channel_items, &links.channels))
+                (checks("channels", "Channels where links are allowed", "Used when \"Every channel\" is chosen.", &channel_items, &links.exempt_channels))
+                (textarea("domains", "Allowed websites", "One domain per line, for example tenor.com. Their subdomains are allowed too.", &links.allowed_domains.join("\n"), 4, 2000))
+                (checks("x_channels", "Channels where x.com is blocked anyway", "x.com and twitter.com links are removed there even if allowed above.", &channel_items, &links.x_blocked_channels))
                 (checks("roles", "Roles allowed to post links", "", &role_items, &links.exempt_roles))
-                (checks("channels", "Channels where links are allowed", "", &channel_items, &links.exempt_channels))
+                (number_input("timeout", "Timeout of the author (seconds)", "0: none.", links.timeout_secs, 0, 3600))
+                (channel_select("review_channel", "Link review channel", "Optional. The member can send the removed link to the staff, who accepts it (the bot posts it) or refuses it here.", text_channels(), &links.review_channel))
             }
         }
     }
@@ -1283,7 +1406,7 @@ pub fn guild_config(
         } @else {
             form.card.form method="post" action={ (base) "/" (module) } data-track {
                 (csrf_field(session))
-                (guild_fields(module, context, config))
+                (guild_fields(module, bot, context, config))
                 div.form-actions {
                     button.btn.primary type="submit" { "Save" }
                 }

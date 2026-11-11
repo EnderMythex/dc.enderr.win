@@ -43,6 +43,8 @@ pub struct Msg {
     pub ping_roles: Vec<String>,
     /// Allows @everyone and @here (announcements chosen by an admin only).
     pub ping_everyone: bool,
+    /// Message this one answers (a Discord reply).
+    pub reply_to: Option<String>,
     /// Image still to draw; see `finish`.
     pending: Option<PendingImage>,
 }
@@ -206,6 +208,12 @@ impl Msg {
         self
     }
 
+    /// Sends the message as a reply to another one.
+    pub fn reply_to(mut self, message_id: &str) -> Self {
+        self.reply_to = Some(message_id.to_owned());
+        self
+    }
+
     pub fn ephemeral(mut self) -> Self {
         self.ephemeral = true;
         self
@@ -242,6 +250,10 @@ impl Msg {
                 "roles": self.ping_roles,
             },
         });
+        if let Some(message_id) = &self.reply_to {
+            payload["message_reference"] =
+                json!({ "message_id": message_id, "fail_if_not_exists": false });
+        }
         if !self.files.is_empty() {
             let attachments: Vec<Value> = self
                 .files
@@ -280,6 +292,11 @@ pub fn section_thumb(content: impl Into<String>, image_url: &str) -> Value {
 /// Text with a button on the right.
 pub fn section_button(content: impl Into<String>, button: Value) -> Value {
     json!({ "type": 9, "components": [text(content)], "accessory": button })
+}
+
+/// A downloadable file of the message (`attachment://name`).
+pub fn file(url: &str) -> Value {
+    json!({ "type": 13, "file": { "url": url } })
 }
 
 /// Full-width image. Use `attachment://name.png` for an uploaded file.

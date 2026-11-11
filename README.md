@@ -55,6 +55,13 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |
 | Announcements | `/announce` (form with title and text, picture, @everyone / @here / role) · `/maintenance start\|end` | — |
 | Giveaways | `/giveaway start\|end\|reroll\|cancel\|list`: Enter button with live count, optional required role, automatic draw, rerolls without previous winners | — |
+| Anti-scam | — | Anti-scam: Discord invites (even disguised), the "insider" pitch, scam pictures checked by AI (Gemini), staff channel with Unban |
+| Link reviews | — | Link lock: watched channels, x.com blocked per channel, timeout, the member can send the link to the staff who accepts or refuses it |
+| Role panel | — | Role panel: up to 10 buttons to take or drop a role |
+| AI assistant | mention the bot | AI assistant: knowledge, channels, length, cooldown (needs `GEMINI_API_KEY_<SLUG>`) |
+| Twitch alerts | — | Twitch: streamers, channel, role (needs `TWITCH_CLIENT_ID_<SLUG>` and `TWITCH_CLIENT_SECRET_<SLUG>`) |
+| Safety reminders | — | Safety reminders: French and English channels, interval |
+| Members | `/stats` `/missing-role` | — |
 | Settings panel | `/settings view`: image of the configuration, a menu per module, buttons and pickers to change it; `/help` | Everything |
 
 **Who is an admin?** Moderation and settings commands are reserved to: the
@@ -106,6 +113,15 @@ per bot; until it is done, members get the image captcha instead.
 
 The page identifies the member with Discord's OAuth2 (`identify` scope) through
 the Activity itself, shows the captcha, and the bot then gives the roles.
+
+### Packs
+
+A bot can ship extra content in `bots/<slug>/assets/`, enabled with
+`packs = [...]` in its `bot.toml`. The `scanline` pack (bot Scanline) adds
+`/filters`, `/tools`, `/tuto-terminal` and `/wallet-tracker`, and the AI
+assistant's default knowledge (`assistant.md`); see
+`bots/scanline/assets/README.md`. The presence can also show the SOL price
+(Settings → Activity → SOL price).
 
 ## Adding a bot
 

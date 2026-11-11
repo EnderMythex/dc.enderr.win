@@ -1,0 +1,11 @@
+# Scanline — the Sang features, plus the Scanline pack: AI assistant context,
+# /filters, /tools, /tuto-terminal and /wallet-tracker (files in assets/).
+
+name = "Scanline"
+description = "Anti-scam, AI assistant and trading resources for the Scanline - Memecoins server, with every Sang feature."
+
+# Discord user ids allowed to manage this bot from the panel.
+owners = []
+
+# Content shipped in assets/: see assets/README.md.
+packs = ["scanline"]

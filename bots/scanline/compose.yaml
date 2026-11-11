@@ -1,0 +1,24 @@
+# Container of the Scanline bot. From the repository root:
+#   docker compose -f bots/scanline/compose.yaml up -d --build
+name: dc-bot-scanline
+
+services:
+  bot:
+    build:
+      context: ../..
+      target: bot
+    image: dc-bot:latest
+    container_name: dc-bot-scanline
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BOT_SLUG: scanline
+      BOT_CONFIG_DIR: /config
+      DASHBOARD_URL: https://dc.enderr.win/bots/scanline
+    labels:
+      # Required: the panel only controls containers carrying this label
+      # with the bot's slug as value.
+      win.enderr.dc.bot: scanline
+    volumes:
+      # bot.toml, guilds/ (written by the panel) and data/ (the bot's database).
+      - ./:/config

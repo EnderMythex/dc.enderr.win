@@ -18,7 +18,14 @@ pub const DIR_NAME: &str = "guilds";
 /// `captcha` is an image captcha inside Discord; `activity` shows the
 /// captcha in a Discord Activity and `web` on a page of the panel, reached
 /// with a signed link (see the README).
-pub const VERIFY_MODES: &[&str] = &["none", "button", "captcha", "activity", "web"];
+pub const VERIFY_MODES: &[&str] = &["none", "button", "colors", "captcha", "activity", "web"];
+/// Where the link lock applies: every channel but the exempt ones, or only
+/// the listed ones.
+pub const LINK_SCOPES: &[&str] = &["all", "listed"];
+pub const MAX_ROLE_BUTTONS: usize = 10;
+pub const MAX_DM_LINKS: usize = 3;
+pub const MAX_TWITCH_LOGINS: usize = 10;
+const MAX_CONTEXT: usize = 12_000;
 /// Captcha of the Activity and of the web page: type a code, or slide a
 /// puzzle piece into place.
 pub const CAPTCHA_STYLES: &[&str] = &["text", "slide"];
@@ -40,6 +47,11 @@ pub struct GuildConfig {
     pub tickets: Tickets,
     pub xp: Xp,
     pub logs: Logs,
+    pub anti_scam: AntiScam,
+    pub role_panel: RolePanel,
+    pub assistant: Assistant,
+    pub twitch: Twitch,
+    pub reminders: Reminders,
 }
 
 /// Who may use the moderation and settings commands, in addition to the
@@ -59,6 +71,143 @@ pub struct LockUrl {
     pub exempt_channels: Vec<String>,
     /// Domains that stay allowed, e.g. `youtube.com`.
     pub allowed_domains: Vec<String>,
+    /// One of [`LINK_SCOPES`].
+    pub scope: String,
+    /// The channels watched when `scope` is `listed`.
+    pub channels: Vec<String>,
+    /// Channels where x.com / twitter.com links are blocked too, even if
+    /// allowed elsewhere.
+    pub x_blocked_channels: Vec<String>,
+    /// Members whose link is removed can send it to the staff, who accept
+    /// (the bot posts it) or refuse it in this channel.
+    pub review_channel: Option<String>,
+    /// Seconds a member is timed out for posting a blocked link (0: none).
+    pub timeout_secs: u32,
+}
+
+/// Automatic protection against scams. Sanctions never touch bot admins.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AntiScam {
+    /// Discord invite links (even disguised): message deleted, author kicked.
+    pub invites: bool,
+    /// The recurring "join an insider, text me" pitch: deleted, author banned.
+    pub insider: bool,
+    /// Pictures checked by AI for "I make you rich, DM me" recruiting ads:
+    /// deleted, author banned. Needs the bot's Gemini key.
+    pub images: bool,
+    /// Where the staff is told about scam images and failed sanctions, with
+    /// an Unban button.
+    pub staff_channel: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleButton {
+    pub role: String,
+    pub label: String,
+    #[serde(default)]
+    pub emoji: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// A panel of buttons members click to take or drop roles.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RolePanel {
+    pub enabled: bool,
+    pub channel: Option<String>,
+    pub title: String,
+    pub buttons: Vec<RoleButton>,
+}
+
+impl Default for RolePanel {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel: None,
+            title: "Pick your roles".into(),
+            buttons: Vec::new(),
+        }
+    }
+}
+
+/// AI answers to members who mention the bot (Gemini).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Assistant {
+    pub enabled: bool,
+    /// Knowledge and tone given to the AI; empty: the bot's default context.
+    pub context: String,
+    /// Channels where it answers; empty: everywhere.
+    pub channels: Vec<String>,
+    /// Longer questions are refused, to protect the API quota.
+    pub max_length: u32,
+    /// Seconds between two questions of one member.
+    pub cooldown_secs: u32,
+}
+
+impl Default for Assistant {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            context: String::new(),
+            channels: Vec::new(),
+            max_length: 600,
+            cooldown_secs: 8,
+        }
+    }
+}
+
+/// Announces when Twitch streamers go live.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Twitch {
+    pub enabled: bool,
+    pub channel: Option<String>,
+    /// Role mentioned with each alert.
+    pub role: Option<String>,
+    /// Twitch user names, e.g. `dh_trenches`.
+    pub logins: Vec<String>,
+}
+
+/// A safety reminder about scams, posted regularly in French and English.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Reminders {
+    pub enabled: bool,
+    pub channel_fr: Option<String>,
+    pub channel_en: Option<String>,
+    pub interval_hours: u32,
+}
+
+impl Default for Reminders {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel_fr: None,
+            channel_en: None,
+            interval_hours: 48,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkButton {
+    pub label: String,
+    pub url: String,
+}
+
+/// `Label | https://url` -> a link button; `None` when malformed.
+pub fn parse_link_button(line: &str) -> Option<LinkButton> {
+    let (label, url) = line.split_once('|')?;
+    let (label, url) = (label.trim(), url.trim());
+    let url_ok =
+        url.starts_with("https://") && url.len() <= 512 && !url.contains(char::is_whitespace);
+    (!label.is_empty() && url_ok).then(|| LinkButton {
+        label: label.chars().take(80).collect(),
+        url: url.to_owned(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +219,14 @@ pub struct Welcome {
     pub message: String,
     pub image: bool,
     pub auto_roles: Vec<String>,
+    /// Private message sent to each new member (with safety tips).
+    pub dm_enabled: bool,
+    pub dm_text: String,
+    /// Optional English version: the DM then has a language button.
+    pub dm_text_en: String,
+    /// Adds the anti-scam tips and the "turn off your DMs" picture.
+    pub dm_safety: bool,
+    pub dm_links: Vec<LinkButton>,
     /// Channels where a new member is mentioned, the mention being deleted
     /// after [`Welcome::ping_seconds`]: it draws their attention to those
     /// channels. Empty: off. Works even when the welcome message is off.
@@ -90,6 +247,11 @@ impl Default for Welcome {
             auto_roles: Vec::new(),
             ping_channels: Vec::new(),
             ping_seconds: 3,
+            dm_enabled: false,
+            dm_text: "Welcome to **{server}**! Glad to have you with us.".into(),
+            dm_text_en: String::new(),
+            dm_safety: true,
+            dm_links: Vec::new(),
         }
     }
 }
@@ -320,6 +482,68 @@ impl GuildConfig {
         rewards.truncate(MAX_REWARDS);
 
         clean_id(&mut self.logs.channel);
+
+        let welcome = &mut self.welcome;
+        clean_text(&mut welcome.dm_text, MAX_TEXT, &defaults.welcome.dm_text);
+        welcome.dm_text_en = welcome.dm_text_en.trim().chars().take(MAX_TEXT).collect();
+        welcome
+            .dm_links
+            .retain(|link| parse_link_button(&format!("{}|{}", link.label, link.url)).is_some());
+        welcome.dm_links.truncate(MAX_DM_LINKS);
+
+        let links = &mut self.lock_url;
+        clean_choice(&mut links.scope, LINK_SCOPES, "all");
+        clean_ids(&mut links.channels);
+        clean_ids(&mut links.x_blocked_channels);
+        clean_id(&mut links.review_channel);
+        links.timeout_secs = links.timeout_secs.min(3600);
+
+        clean_id(&mut self.anti_scam.staff_channel);
+
+        let panel = &mut self.role_panel;
+        clean_id(&mut panel.channel);
+        clean_text(&mut panel.title, MAX_TITLE, &defaults.role_panel.title);
+        panel
+            .buttons
+            .retain(|b| is_snowflake(&b.role) && !b.label.trim().is_empty());
+        for button in &mut panel.buttons {
+            button.label = button.label.trim().chars().take(80).collect();
+            button.emoji = button.emoji.trim().chars().take(8).collect();
+            button.description = button.description.trim().chars().take(200).collect();
+        }
+        panel.buttons.dedup_by(|a, b| a.role == b.role);
+        panel.buttons.truncate(MAX_ROLE_BUTTONS);
+
+        let assistant = &mut self.assistant;
+        assistant.context = assistant.context.trim().chars().take(MAX_CONTEXT).collect();
+        clean_ids(&mut assistant.channels);
+        assistant.max_length = assistant.max_length.clamp(50, 2000);
+        assistant.cooldown_secs = assistant.cooldown_secs.clamp(1, 600);
+
+        let twitch = &mut self.twitch;
+        clean_id(&mut twitch.channel);
+        clean_id(&mut twitch.role);
+        for login in &mut twitch.logins {
+            *login = login
+                .trim()
+                .trim_start_matches("https://twitch.tv/")
+                .trim_start_matches("https://www.twitch.tv/")
+                .to_lowercase();
+        }
+        twitch.logins.retain(|login| {
+            (3..=25).contains(&login.len())
+                && login
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        });
+        twitch.logins.sort();
+        twitch.logins.dedup();
+        twitch.logins.truncate(MAX_TWITCH_LOGINS);
+
+        let reminders = &mut self.reminders;
+        clean_id(&mut reminders.channel_fr);
+        clean_id(&mut reminders.channel_en);
+        reminders.interval_hours = reminders.interval_hours.clamp(6, 24 * 14);
     }
 
     pub fn path(bot_dir: &Path, guild_id: &str) -> PathBuf {
@@ -438,6 +662,43 @@ mod tests {
         assert_eq!(c.welcome.ping_channels.len(), MAX_PING_CHANNELS);
         assert!(c.rules.verified_role.is_some());
         assert_eq!(c.rules.remove_role, None);
+    }
+
+    #[test]
+    fn new_sections_are_bounded() {
+        let mut c = GuildConfig::default();
+        c.twitch.logins = vec![
+            " https://twitch.tv/DH_Trenches ".into(),
+            "a".into(),
+            "bad name".into(),
+        ];
+        c.role_panel.buttons = vec![
+            RoleButton {
+                role: "175928847299117063".into(),
+                label: " FR ".into(),
+                emoji: "🇫🇷".into(),
+                description: String::new(),
+            },
+            RoleButton {
+                role: "nope".into(),
+                label: "x".into(),
+                emoji: String::new(),
+                description: String::new(),
+            },
+        ];
+        c.lock_url.scope = "weird".into();
+        c.assistant.max_length = 1;
+        c.reminders.interval_hours = 1;
+        c.sanitize();
+        assert_eq!(c.twitch.logins, vec!["dh_trenches"]);
+        assert_eq!(c.role_panel.buttons.len(), 1);
+        assert_eq!(c.role_panel.buttons[0].label, "FR");
+        assert_eq!(c.lock_url.scope, "all");
+        assert_eq!(c.assistant.max_length, 50);
+        assert_eq!(c.reminders.interval_hours, 6);
+        assert!(parse_link_button("Axiom | https://axiom.trade/@x").is_some());
+        assert!(parse_link_button("Bad | http://x.com").is_none());
+        assert!(parse_link_button("no url").is_none());
     }
 
     #[test]

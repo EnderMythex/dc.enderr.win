@@ -913,13 +913,25 @@ pub async fn component(ctx: &Ctx) {
 // ---------------------------------------------------------------- help
 
 pub async fn help(ctx: &Ctx) {
-    let everyone = "`/rank` · your level and XP\n`/leaderboard` · the most active members";
+    let mut everyone =
+        "`/rank` · your level and XP\n`/leaderboard` · the most active members".to_owned();
+    if ctx
+        .app
+        .packs
+        .iter()
+        .any(|pack| pack == crate::scanline::PACK)
+    {
+        everyone.push_str(
+            "\n`/filters` · my Axiom and Terminal filters\n`/wallet-tracker` · my wallet tracker\n`/tools` · useful links\n`/tuto-terminal` · Terminal setup guide",
+        );
+    }
     let mut children = vec![ui::text(everyone)];
     if ctx.is_admin() {
         let sections = [
             "**Channels**\n`/lock` `/unlock` · stop or allow writing\n`/hide` `/unhide` · hide or show a channel\n`/lockurl` · block links",
             "**Members**\n`/mute` `/unmute` · timeout\n`/kick` `/ban` · asks for confirmation\n`/unban`\n`/role add` `/role remove`\n`/role add-all` `/role remove-all` · every member\n`/xp add` `/xp remove` `/xp reset`",
             "**Announcements**\n`/announce` · title, text, picture, mention\n`/maintenance start` `/maintenance end`",
+            "**Members**\n`/stats` · arrivals today and this month\n`/missing-role` · members without a role",
             "**Giveaways**\n`/giveaway start` · prize, duration, winners\n`/giveaway end` `/giveaway reroll` `/giveaway cancel` `/giveaway list`",
             "**Configuration**\n`/settings view` · the settings panel\n`/settings welcome|rules|tickets|xp|logs`\n`/ownerbot add|remove|list` · bot admins",
         ];

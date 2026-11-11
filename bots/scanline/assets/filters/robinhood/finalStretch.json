@@ -1,0 +1,168 @@
+{
+  "filters": {
+    "protocols": {
+      "Noxa": false,
+      "Bow": false,
+      "Pons": true,
+      "Pons V2": true,
+      "Bankr": false,
+      "Klik": false,
+      "Flap": false,
+      "Trench": false,
+      "Virtuals": false,
+      "Bags": false,
+      "Livo": false,
+      "Dyor": false,
+      "Dyor V3": false,
+      "Ape.store": false,
+      "Leavehood": false,
+      "Coinbarrel": false,
+      "Hood": false,
+      "Meme.bid": false,
+      "Long.xyz": false,
+      "Pools Instant": false,
+      "Pools CCA": false,
+      "o1": false,
+      "o1 stock": false,
+      "StonkBrokers": true,
+      "Dontblink": true,
+      "Lunch": true,
+      "Varo": true,
+      "Orbofi": true,
+      "Pools.fun": true,
+      "Rally": true,
+      "Uniswap v2": false,
+      "Uniswap v3": false,
+      "Uniswap v4": false,
+      "SushiSwap v2": false,
+      "SushiSwap v3": false,
+      "Up v2": false,
+      "Up v3": false
+    },
+    "searchKeywords": [],
+    "excludeKeywords": [],
+    "twitterHandles": [],
+    "dexPaid": false,
+    "age": {
+      "max": 30,
+      "min": null,
+      "unit": "minutes"
+    },
+    "top10Holders": {
+      "max": null,
+      "min": null
+    },
+    "devHolding": {
+      "max": null,
+      "min": null
+    },
+    "snipers": {
+      "max": null,
+      "min": null
+    },
+    "insiders": {
+      "max": null,
+      "min": null
+    },
+    "bundle": {
+      "max": null,
+      "min": null
+    },
+    "holders": {
+      "max": null,
+      "min": 10
+    },
+    "botUsers": {
+      "max": null,
+      "min": null
+    },
+    "tax": {
+      "max": null,
+      "min": null
+    },
+    "bondingCurve": {
+      "max": null,
+      "min": null
+    },
+    "liquidity": {
+      "max": null,
+      "min": null
+    },
+    "volume": {
+      "max": null,
+      "min": null
+    },
+    "marketCap": {
+      "max": null,
+      "min": 6500
+    },
+    "fees": {
+      "max": null,
+      "min": null
+    },
+    "txns": {
+      "max": null,
+      "min": null
+    },
+    "numBuys": {
+      "max": null,
+      "min": null
+    },
+    "numSells": {
+      "max": null,
+      "min": null
+    },
+    "numMigrations": {
+      "max": null,
+      "min": null
+    },
+    "numDevPairs": {
+      "max": null,
+      "min": null
+    },
+    "tweetAgeMins": {
+      "max": null,
+      "min": null,
+      "unit": "minutes"
+    },
+    "twitter": {
+      "max": null,
+      "min": null
+    },
+    "twitterFollowers": {
+      "max": null,
+      "min": null
+    },
+    "twitterFollowing": {
+      "max": null,
+      "min": null
+    },
+    "twitterExists": false,
+    "website": false,
+    "telegram": false,
+    "tiktok": false,
+    "atLeastOneSocial": false,
+    "isStreaming": false,
+    "userCount": {
+      "max": null,
+      "min": null
+    },
+    "axiomCommunityMembers": {
+      "max": null,
+      "min": null
+    },
+    "imgReuseCount": {
+      "max": null,
+      "min": null
+    },
+    "showQuoteTokens": {
+      "weth": true,
+      "usdg": true,
+      "virtual": true,
+      "stock": true
+    },
+    "showFlapPve": false,
+    "showFlapVault": false
+  },
+  "tab": "finalStretch"
+}

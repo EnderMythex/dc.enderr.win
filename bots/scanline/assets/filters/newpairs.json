@@ -1,0 +1,157 @@
+{
+    "filters": {
+        "protocols": {
+            "raydium": false,
+            "pump": true,
+            "mayhem": false,
+            "pumpAmm": false,
+            "launchLab": false,
+            "virtualCurve": false,
+            "launchACoin": false,
+            "bonk": true,
+            "bonkers": false,
+            "boop": false,
+            "surge": false,
+            "meteoraAmm": false,
+            "meteoraAmmV2": false,
+            "moonshot": false,
+            "moonshotApp": false,
+            "heaven": false,
+            "daosFun": false,
+            "candle": false,
+            "sugar": false,
+            "jupiterStudio": false,
+            "bags": false,
+            "soar": false,
+            "printr": false,
+            "liquidAf": false,
+            "liquidAfAmm": true,
+            "riseRich": false,
+            "stonkfun": false,
+            "pve": true,
+            "orca": false,
+            "wavebreak": false
+        },
+        "searchKeywords": [],
+        "excludeKeywords": [],
+        "dexPaid": false,
+        "age": {
+            "max": 5,
+            "min": null,
+            "unit": "hours"
+        },
+        "userCount": {
+            "max": null,
+            "min": null
+        },
+        "axiomCommunityMembers": {
+            "min": null,
+            "max": null
+        },
+        "top10Holders": {
+            "max": null,
+            "min": null
+        },
+        "devHolding": {
+            "max": 15,
+            "min": null
+        },
+        "snipers": {
+            "max": null,
+            "min": null
+        },
+        "insiders": {
+            "max": null,
+            "min": null
+        },
+        "bundle": {
+            "max": null,
+            "min": null
+        },
+        "holders": {
+            "max": null,
+            "min": null
+        },
+        "botUsers": {
+            "max": null,
+            "min": null
+        },
+        "bondingCurve": {
+            "max": null,
+            "min": null
+        },
+        "liquidity": {
+            "max": null,
+            "min": null
+        },
+        "volume": {
+            "max": null,
+            "min": 4000
+        },
+        "marketCap": {
+            "max": null,
+            "min": 2200
+        },
+        "fees": {
+            "max": null,
+            "min": 0.02
+        },
+        "txns": {
+            "max": null,
+            "min": null
+        },
+        "numBuys": {
+            "max": null,
+            "min": null
+        },
+        "numSells": {
+            "max": null,
+            "min": null
+        },
+        "numMigrations": {
+            "max": null,
+            "min": null
+        },
+        "numDevPairs": {
+            "max": null,
+            "min": null
+        },
+        "tweetAgeMins": {
+            "max": null,
+            "min": null,
+            "unit": "minutes"
+        },
+        "twitter": {
+            "max": null,
+            "min": null
+        },
+        "twitterHandles": [],
+        "twitterFollowers": {
+            "max": null,
+            "min": null
+        },
+        "twitterFollowing": {
+            "max": null,
+            "min": null
+        },
+        "twitterExists": false,
+        "website": false,
+        "telegram": false,
+        "tiktok": false,
+        "atLeastOneSocial": true,
+        "isStreaming": false,
+        "showPumpOffchain": true,
+        "showCashback": true,
+        "showBoosted": true,
+        "showQuoteTokens": {
+            "sol": true,
+            "usdc": true,
+            "usd1": true,
+            "stock": true,
+            "other": true
+        },
+        "showAgents": true,
+        "mustEndInPump": false
+    },
+    "tab": "newPairs"
+}

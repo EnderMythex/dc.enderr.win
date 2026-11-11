@@ -34,6 +34,9 @@ struct BotFile {
     #[serde(default)]
     container: Option<String>,
     owners: Vec<String>,
+    /// Extra content shipped in the bot's `assets/` folder, e.g. `scanline`.
+    #[serde(default)]
+    packs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +47,7 @@ pub struct BotDef {
     pub container: String,
     /// Discord user ids allowed to manage this bot.
     pub owners: Vec<String>,
+    pub packs: Vec<String>,
     pub dir: PathBuf,
 }
 
@@ -151,8 +155,27 @@ pub fn load_one(path: &Path, slug: &str) -> Result<BotDef, String> {
         description: file.description.filter(|d| !d.trim().is_empty()),
         container,
         owners: with_extra_owners(file.owners, std::env::var(env_name("OWNERS", slug)).ok()),
+        packs: file.packs,
         dir: path.to_owned(),
     })
+}
+
+/// Folder of a bot holding the files it sends (filters, documents...).
+pub const ASSETS_DIR: &str = "assets";
+
+/// Copies a folder and its sub-folders, replacing files already there.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)?.flatten() {
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        if path.is_dir() {
+            copy_tree(&path, &target)?;
+        } else if path.is_file() {
+            fs::copy(&path, &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// `OWNERS` + `my-bot` -> `OWNERS_MY_BOT`.
@@ -211,6 +234,10 @@ pub fn seed(seed_dir: &Path, bots_dir: &Path, only: Option<&str>) -> std::io::Re
         let target = bots_dir.join(&slug);
         fs::create_dir_all(&target)?;
         fs::copy(&source, target.join("bot.toml"))?;
+        let assets = entry.path().join(ASSETS_DIR);
+        if assets.is_dir() {
+            copy_tree(&assets, &target.join(ASSETS_DIR))?;
+        }
         copied.push(slug);
     }
     copied.sort();
@@ -320,6 +347,16 @@ mod tests {
         let seed_dir = temp_dir("seed-src");
         let bots = temp_dir("seed-dst");
         write_bot(&seed_dir, "sang", "name = \"Sang\"\nowners = []\n");
+        fs::create_dir_all(seed_dir.join("sang").join("assets").join("filters")).unwrap();
+        fs::write(
+            seed_dir
+                .join("sang")
+                .join("assets")
+                .join("filters")
+                .join("a.json"),
+            "{}",
+        )
+        .unwrap();
         write_bot(&seed_dir, "music", "name = \"Music\"\nowners = []\n");
         fs::create_dir_all(seed_dir.join("_template")).unwrap();
         fs::write(seed_dir.join("_template").join("bot.toml"), "x").unwrap();
@@ -331,6 +368,13 @@ mod tests {
         write_bot(&seed_dir, "sang", "name = \"Sang 2\"\nowners = []\n");
         assert_eq!(seed(&seed_dir, &bots, None).unwrap(), vec!["music", "sang"]);
         assert!(bots.join("sang").join("guilds").is_dir());
+        assert!(
+            bots.join("sang")
+                .join("assets")
+                .join("filters")
+                .join("a.json")
+                .is_file()
+        );
         let toml = fs::read_to_string(bots.join("sang").join("bot.toml")).unwrap();
         assert!(toml.contains("Sang 2"));
         fs::remove_dir_all(seed_dir).unwrap();

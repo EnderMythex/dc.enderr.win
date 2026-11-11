@@ -59,7 +59,8 @@ fn targets(members: &[Value], job: &Job) -> Vec<(String, bool)> {
         .collect()
 }
 
-async fn list_members(app: &App, guild_id: &str) -> Result<Vec<Value>, ApiError> {
+/// Every member of a server (pages of 1000).
+pub async fn list_members(app: &App, guild_id: &str) -> Result<Vec<Value>, ApiError> {
     let mut all = Vec::new();
     let mut after = "0".to_owned();
     loop {

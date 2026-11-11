@@ -1,0 +1,24 @@
+{
+    "MARKET CAP": {
+        "from": 8000,
+        "to": null
+    },
+    "HOLDERS COUNT": {
+        "to": null,
+        "from": 100
+    },
+    "PERCENTAGE DEV HOLDING": {
+        "from": null,
+        "to": 51
+    },
+    "LAUNCHPADS": [
+        "meteora-curve",
+        "bags",
+        "bonk",
+        "pumpfun"
+    ],
+    "TOTAL_SOL_FEES": {
+        "to": null,
+        "from": 3
+    }
+}

@@ -57,6 +57,7 @@ pub async fn start(ctx: &Ctx) {
     }
     match rules.verification.as_str() {
         "captcha" => image_captcha(ctx).await,
+        "colors" => ctx.reply(color_challenge(ctx, None).ephemeral()).await,
         "activity" => {
             if activity_configured(&ctx.app) {
                 match ctx.launch_activity().await {
@@ -96,6 +97,89 @@ fn web_link(ctx: &Ctx) -> Option<String> {
         dc_core::now(),
     );
     Some(format!("{origin}/verify/{}?v={value}", ctx.app.slug))
+}
+
+/// `(key, name, emoji, button style)`: each color is the real button color.
+const COLORS: [(&str, &str, &str, u8); 4] = [
+    ("blue", "Blue", "🔵", ui::STYLE_PRIMARY),
+    ("green", "Green", "🟢", ui::STYLE_SUCCESS),
+    ("red", "Red", "🔴", ui::STYLE_DANGER),
+    ("grey", "Grey", "⚪", ui::STYLE_SECONDARY),
+];
+pub const COLOR_PREFIX: &str = "verify:color:";
+
+/// "Click the green button", with the four colors in a random order
+/// (ported from the Scanline bot).
+fn color_challenge(ctx: &Ctx, notice: Option<&str>) -> Msg {
+    use dc_core::crypto::random_range;
+    let target = COLORS[random_range(0, COLORS.len() as u32 - 1) as usize];
+    {
+        let mut captchas = ctx.app.captchas.lock().unwrap();
+        captchas.retain(|_, c| c.expires > Instant::now());
+        captchas.insert(
+            (ctx.guild_id.clone(), ctx.user_id().to_owned()),
+            Captcha {
+                code: target.0.to_owned(),
+                expires: Instant::now() + CAPTCHA_LIFETIME,
+                attempts: 0,
+            },
+        );
+    }
+    let mut order = COLORS.to_vec();
+    for index in (1..order.len()).rev() {
+        order.swap(index, random_range(0, index as u32) as usize);
+    }
+    let buttons = order
+        .iter()
+        .map(|(key, name, emoji, style)| {
+            ui::emoji_button(*style, emoji, name, &format!("{COLOR_PREFIX}{key}"))
+        })
+        .collect();
+    let mut children = Vec::new();
+    if let Some(notice) = notice {
+        children.push(ui::text(notice));
+    }
+    children.push(ui::text(format!(
+        "### Click the {} **{}** button",
+        target.2, target.1
+    )));
+    children.push(ui::row(buttons));
+    Msg::card(ui::WHITE, children)
+}
+
+/// A color button was clicked.
+pub async fn check_color(ctx: &Ctx) {
+    let picked = ctx.custom_id().trim_start_matches(COLOR_PREFIX);
+    let key = (ctx.guild_id.clone(), ctx.user_id().to_owned());
+    let answer = ctx
+        .app
+        .captchas
+        .lock()
+        .unwrap()
+        .get(&key)
+        .filter(|c| c.expires > Instant::now())
+        .map(|c| c.code.clone());
+    match answer {
+        None => {
+            let notice = "⌛ This challenge expired, here is a new one.";
+            ctx.update(color_challenge(ctx, Some(notice))).await;
+        }
+        Some(answer) if answer != picked => {
+            let notice = "❌ **Wrong button.** Try again.";
+            ctx.update(color_challenge(ctx, Some(notice))).await;
+        }
+        Some(_) => {
+            ctx.app.captchas.lock().unwrap().remove(&key);
+            let msg = match grant_roles(&ctx.app, &ctx.guild_id, ctx.user_id()).await {
+                Ok(()) => Msg::success("Verified", "Welcome! You now have access to the server."),
+                Err(GrantError::NotSetUp) => Msg::error("Verification is not set up anymore."),
+                Err(GrantError::Discord(_)) => Msg::error(
+                    "I could not give you the role. Ask an administrator to check my permissions.",
+                ),
+            };
+            ctx.update(msg).await;
+        }
+    }
 }
 
 /// Sends the captcha image with a button that opens the answer form.

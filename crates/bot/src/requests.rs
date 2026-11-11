@@ -138,11 +138,35 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
             (channel, logs::sample())
         }
         // Panels are permanent messages: a test posts them again.
-        "rules" | "tickets" => {
-            let (enabled, channel) = if module == "rules" {
-                (config.rules.enabled, config.rules.channel.clone())
+        "reminders" => {
+            let reminders = &config.reminders;
+            let targets = [
+                (&reminders.channel_fr, crate::lang::Lang::Fr),
+                (&reminders.channel_en, crate::lang::Lang::En),
+            ];
+            let mut posted = Vec::new();
+            for (channel, lang) in targets {
+                let Some(channel) = channel else { continue };
+                app.api
+                    .send_message(channel, &crate::reminders::reminder(lang))
+                    .await
+                    .map_err(|error| error.user_message())?;
+                posted.push(channel_label(app, guild_id, channel));
+            }
+            return if posted.is_empty() {
+                missing("a French or English channel")
             } else {
-                (config.tickets.enabled, config.tickets.panel_channel.clone())
+                Ok(format!("Reminder sent to {}.", posted.join(" and ")))
+            };
+        }
+        "rules" | "tickets" | "roles" => {
+            let (enabled, channel) = match module {
+                "rules" => (config.rules.enabled, config.rules.channel.clone()),
+                "roles" => (
+                    config.role_panel.enabled && !config.role_panel.buttons.is_empty(),
+                    config.role_panel.channel.clone(),
+                ),
+                _ => (config.tickets.enabled, config.tickets.panel_channel.clone()),
             };
             let Some(channel) = channel.filter(|_| enabled) else {
                 return Err("Enable the panel, choose its channel and save first.".into());
