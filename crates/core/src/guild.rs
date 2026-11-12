@@ -25,6 +25,10 @@ pub const LINK_SCOPES: &[&str] = &["all", "listed"];
 pub const MAX_ROLE_BUTTONS: usize = 10;
 pub const MAX_DM_LINKS: usize = 3;
 pub const MAX_TWITCH_LOGINS: usize = 10;
+pub const MAX_REPOS: usize = 10;
+pub const MAX_STATUS_SITES: usize = 8;
+/// GitHub activities a server can follow.
+pub const GITHUB_EVENTS: &[&str] = &["push", "pull_request", "issues", "star", "fork", "tag"];
 const MAX_CONTEXT: usize = 12_000;
 /// Captcha of the Activity and of the web page: type a code, or slide a
 /// puzzle piece into place.
@@ -52,6 +56,146 @@ pub struct GuildConfig {
     pub assistant: Assistant,
     pub twitch: Twitch,
     pub reminders: Reminders,
+    pub releases: Releases,
+    pub github: GitHubFeed,
+    pub status: StatusPanel,
+    pub minecraft: Minecraft,
+}
+
+/// Announces the new versions (GitHub releases) of a repository.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Releases {
+    pub enabled: bool,
+    pub channel: Option<String>,
+    /// Role mentioned with each new version.
+    pub role: Option<String>,
+    /// `owner/name`, e.g. `Misty-MC/Misty`.
+    pub repo: String,
+    /// Pre-releases are announced too.
+    pub prereleases: bool,
+    /// "Download" button of the announcements and of `/download`; empty:
+    /// the release page on GitHub.
+    pub download_url: String,
+    /// Website button of `/download` (optional).
+    pub website: String,
+}
+
+/// Commits, pull requests, issues, stars, forks and tags of repositories.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitHubFeed {
+    pub enabled: bool,
+    pub channel: Option<String>,
+    /// `owner/name` of each repository followed.
+    pub repos: Vec<String>,
+    /// Among [`GITHUB_EVENTS`].
+    pub events: Vec<String>,
+}
+
+impl Default for GitHubFeed {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel: None,
+            repos: Vec::new(),
+            events: vec!["issues".into(), "pull_request".into(), "push".into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusSite {
+    pub name: String,
+    pub url: String,
+}
+
+/// `Name | https://url` (or `Name=https://url`) -> a monitored website.
+pub fn parse_status_site(line: &str) -> Option<StatusSite> {
+    let (name, url) = line.split_once('|').or_else(|| line.split_once('='))?;
+    let (name, url) = (name.trim(), url.trim());
+    let url_ok = (url.starts_with("https://") || url.starts_with("http://"))
+        && url.len() <= 300
+        && !url.contains(char::is_whitespace);
+    (!name.is_empty() && url_ok).then(|| StatusSite {
+        name: name.chars().take(24).collect(),
+        url: url.to_owned(),
+    })
+}
+
+/// A message kept up to date: websites up or down, latest version,
+/// downloads, players and GitHub stars.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StatusPanel {
+    pub enabled: bool,
+    pub channel: Option<String>,
+    pub sites: Vec<StatusSite>,
+    /// Repository for the version, downloads and stars; empty: the one of
+    /// the release announcements.
+    pub repo: String,
+    /// Address answering `{"players": 123}` (optional).
+    pub players_url: String,
+}
+
+impl StatusPanel {
+    /// The repository shown, falling back to the announced one.
+    pub fn repo_or<'a>(&'a self, releases: &'a Releases) -> &'a str {
+        if self.repo.is_empty() {
+            &releases.repo
+        } else {
+            &self.repo
+        }
+    }
+}
+
+/// A Minecraft Java server: `/smp` and a panel kept up to date.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Minecraft {
+    pub enabled: bool,
+    /// `play.example.com` or `1.2.3.4:25565` (SRV records are followed).
+    pub address: String,
+    pub name: String,
+    pub description: String,
+    /// Shows the names of the connected players.
+    pub show_players: bool,
+    /// Channel of the panel (optional: `/smp` works without it).
+    pub channel: Option<String>,
+}
+
+impl Default for Minecraft {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            address: String::new(),
+            name: "Minecraft server".into(),
+            description: String::new(),
+            show_players: true,
+            channel: None,
+        }
+    }
+}
+
+/// `https://github.com/Owner/Name` or `Owner/Name` -> `Owner/Name`.
+pub fn normalize_repo(input: &str) -> Option<String> {
+    let s = input.trim();
+    let s = s
+        .strip_prefix("https://github.com/")
+        .or_else(|| s.strip_prefix("http://github.com/"))
+        .or_else(|| s.strip_prefix("github.com/"))
+        .unwrap_or(s);
+    let s = s.trim_end_matches('/');
+    let s = s.strip_suffix(".git").unwrap_or(s);
+    let (owner, name) = s.split_once('/')?;
+    let ok = |part: &str| {
+        !part.is_empty()
+            && part.len() <= 100
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    };
+    (ok(owner) && ok(name)).then(|| format!("{owner}/{name}"))
 }
 
 /// Who may use the moderation and settings commands, in addition to the
@@ -446,6 +590,23 @@ fn clean_text(text: &mut String, max: usize, fallback: &str) {
     };
 }
 
+/// Keeps an https link, empties anything else.
+fn clean_url(url: &mut String) {
+    let trimmed = url.trim();
+    let ok = trimmed.starts_with("https://")
+        && trimmed.len() <= 300
+        && !trimmed.contains(char::is_whitespace);
+    *url = if ok {
+        trimmed.to_owned()
+    } else {
+        String::new()
+    };
+}
+
+fn clean_repo(repo: &mut String) {
+    *repo = normalize_repo(repo).unwrap_or_default();
+}
+
 fn clean_choice(value: &mut String, allowed: &[&str], fallback: &str) {
     if !allowed.contains(&value.as_str()) {
         *value = fallback.to_owned();
@@ -602,6 +763,63 @@ impl GuildConfig {
         clean_id(&mut reminders.channel_fr);
         clean_id(&mut reminders.channel_en);
         reminders.interval_hours = reminders.interval_hours.clamp(6, 24 * 14);
+
+        let releases = &mut self.releases;
+        clean_id(&mut releases.channel);
+        clean_id(&mut releases.role);
+        clean_repo(&mut releases.repo);
+        clean_url(&mut releases.download_url);
+        clean_url(&mut releases.website);
+
+        let github = &mut self.github;
+        clean_id(&mut github.channel);
+        let mut repos: Vec<String> = Vec::new();
+        for repo in github.repos.iter().filter_map(|repo| normalize_repo(repo)) {
+            if !repos.contains(&repo) {
+                repos.push(repo);
+            }
+        }
+        repos.truncate(MAX_REPOS);
+        github.repos = repos;
+        github
+            .events
+            .retain(|event| GITHUB_EVENTS.contains(&event.as_str()));
+        github.events.sort();
+        github.events.dedup();
+
+        let status = &mut self.status;
+        clean_id(&mut status.channel);
+        status
+            .sites
+            .retain(|site| parse_status_site(&format!("{}|{}", site.name, site.url)).is_some());
+        status.sites.truncate(MAX_STATUS_SITES);
+        clean_repo(&mut status.repo);
+        let players = status.players_url.trim();
+        status.players_url = if (players.starts_with("https://") || players.starts_with("http://"))
+            && players.len() <= 300
+            && !players.contains(char::is_whitespace)
+        {
+            players.to_owned()
+        } else {
+            String::new()
+        };
+
+        let minecraft = &mut self.minecraft;
+        clean_id(&mut minecraft.channel);
+        minecraft.address = minecraft
+            .address
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '_'))
+            .take(120)
+            .collect();
+        clean_text(&mut minecraft.name, MAX_TITLE, &defaults.minecraft.name);
+        minecraft.description = minecraft
+            .description
+            .trim()
+            .chars()
+            .take(MAX_TEXT)
+            .collect();
     }
 
     pub fn path(bot_dir: &Path, guild_id: &str) -> PathBuf {
@@ -795,6 +1013,40 @@ mod tests {
         assert!(parse_link_button("Axiom | https://axiom.trade/@x").is_some());
         assert!(parse_link_button("Bad | http://x.com").is_none());
         assert!(parse_link_button("no url").is_none());
+    }
+
+    #[test]
+    fn integrations_are_bounded() {
+        assert_eq!(
+            normalize_repo("https://github.com/Misty-MC/Misty.git").as_deref(),
+            Some("Misty-MC/Misty")
+        );
+        assert_eq!(
+            normalize_repo("Misty-MC/Misty-Web").as_deref(),
+            Some("Misty-MC/Misty-Web")
+        );
+        assert!(normalize_repo("nope").is_none() && normalize_repo("a/b/c").is_none());
+        let site = parse_status_site("Site = https://misty-launcher.online/").unwrap();
+        assert_eq!(site.name, "Site");
+        assert!(parse_status_site("Bad | ftp://x").is_none());
+
+        let mut c = GuildConfig::default();
+        c.github.repos = vec![
+            "Misty-MC/Misty".into(),
+            "bad".into(),
+            "Misty-MC/Misty".into(),
+        ];
+        c.github.events = vec!["push".into(), "magic".into()];
+        c.releases.repo = "https://github.com/Misty-MC/Misty".into();
+        c.releases.download_url = "javascript:alert(1)".into();
+        c.minecraft.address = " play.misty.fr:25565 <b> ".into();
+        c.sanitize();
+        assert_eq!(c.github.repos, vec!["Misty-MC/Misty"]);
+        assert_eq!(c.github.events, vec!["push"]);
+        assert_eq!(c.releases.repo, "Misty-MC/Misty");
+        assert_eq!(c.releases.download_url, "");
+        assert_eq!(c.minecraft.address, "play.misty.fr:25565b");
+        assert_eq!(c.status.repo_or(&c.releases), "Misty-MC/Misty");
     }
 
     #[test]

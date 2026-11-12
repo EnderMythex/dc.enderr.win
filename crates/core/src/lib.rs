@@ -5,6 +5,7 @@ pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod guild;
+pub mod misty;
 pub mod registry;
 pub mod render;
 pub mod requests;

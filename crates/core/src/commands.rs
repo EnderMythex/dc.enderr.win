@@ -61,8 +61,15 @@ fn user_and_reason(what: &str) -> Vec<Value> {
 /// Pack of the Scanline bot (`packs = ["scanline"]` in `bot.toml`).
 pub const SCANLINE: &str = "scanline";
 
+/// Pack of the Misty bot: release, download, status and Minecraft commands.
+pub const MISTY: &str = "misty";
+
 /// Commands every member can use; the others are for bot admins.
 pub const PUBLIC: &[&str] = &[
+    "status",
+    "release",
+    "download",
+    "smp",
     "rank",
     "leaderboard",
     "help",
@@ -78,7 +85,29 @@ pub fn for_bot(packs: &[String]) -> Vec<Value> {
     if packs.iter().any(|pack| pack == SCANLINE) {
         commands.extend(scanline());
     }
+    if packs.iter().any(|pack| pack == MISTY) {
+        commands.extend(misty());
+    }
     commands
+}
+
+/// Commands of the `misty` pack (set up in the Releases, Status and
+/// Minecraft sections of the dashboard).
+pub fn misty() -> Vec<Value> {
+    vec![
+        command(
+            "status",
+            "Status: websites, latest version, downloads",
+            vec![],
+        ),
+        command("release", "Latest version and what's new", vec![]),
+        command("download", "Download links of the latest version", vec![]),
+        command(
+            "smp",
+            "Minecraft server: address, players and status",
+            vec![],
+        ),
+    ]
 }
 
 /// Commands of the `scanline` pack.
@@ -579,7 +608,7 @@ mod tests {
                 }
             }
         }
-        let commands = for_bot(&[SCANLINE.to_owned()]);
+        let commands = for_bot(&[SCANLINE.to_owned(), MISTY.to_owned()]);
         let mut names: Vec<&str> = commands
             .iter()
             .map(|c| c["name"].as_str().unwrap())

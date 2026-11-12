@@ -238,6 +238,13 @@ pub fn seed(seed_dir: &Path, bots_dir: &Path, only: Option<&str>) -> std::io::Re
         if assets.is_dir() {
             copy_tree(&assets, &target.join(ASSETS_DIR))?;
         }
+        // A default picture behind the bot's cards; one chosen on the panel
+        // is never replaced.
+        let background = entry.path().join("background.png");
+        let current = target.join(crate::render::BACKGROUND_FILE);
+        if background.is_file() && !current.exists() {
+            fs::copy(&background, &current)?;
+        }
         copied.push(slug);
     }
     copied.sort();

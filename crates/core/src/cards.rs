@@ -269,6 +269,220 @@ pub fn settings(label: &str, title: &str, description: &str, rows: &[Row]) -> St
     frame(WIDTH, height, &out)
 }
 
+/// State of a website at one check of the status panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Beat {
+    Up,
+    Slow,
+    Down,
+}
+
+impl Beat {
+    fn color(self) -> &'static str {
+        match self {
+            Self::Up => "#3ecf8e",
+            Self::Slow => "#f5a524",
+            Self::Down => "#ff5c5c",
+        }
+    }
+}
+
+/// One website of the status panel.
+pub struct SiteRow {
+    pub name: String,
+    pub detail: String,
+    /// `None`: no answer.
+    pub status: Option<u16>,
+    pub latency_ms: u64,
+    /// Older first.
+    pub history: Vec<Beat>,
+}
+
+/// Number of past checks drawn per website.
+pub const HISTORY_LEN: usize = 40;
+
+fn tiles(out: &mut String, top: u32, list: &[(String, String)]) {
+    if list.is_empty() {
+        return;
+    }
+    let gap = 16;
+    let width = (WIDTH - 144 - gap * (list.len() as u32 - 1)) / list.len() as u32;
+    for (index, (label, value)) in list.iter().enumerate() {
+        let x = 72 + (width + gap) * index as u32;
+        let _ = write!(
+            out,
+            r##"<rect x="{x}" y="{top}" width="{width}" height="96" rx="14" fill="#0d0d0d" fill-opacity="0.85" stroke="#2a2a2a"/>
+<text x="{}" y="{}" font-size="15" font-weight="600" fill="{MUTED}" letter-spacing="2">{}</text>
+<text x="{}" y="{}" font-size="30" font-weight="700" fill="{TEXT}">{}</text>"##,
+            x + 22,
+            top + 34,
+            fit_text(&label.to_uppercase(), 18),
+            x + 22,
+            top + 74,
+            fit_text(value, 14),
+        );
+    }
+}
+
+/// Status panel: one row per website (state, latency, recent history) and
+/// tiles with numbers (version, downloads, players, stars).
+pub fn status(label: &str, title: &str, sites: &[SiteRow], numbers: &[(String, String)]) -> String {
+    let row_h = 78;
+    let header = 190;
+    let tiles_h = if numbers.is_empty() { 0 } else { 128 };
+    let height = header + row_h * sites.len().max(1) as u32 + tiles_h + 48;
+    let up = sites
+        .iter()
+        .filter(|s| matches!(s.status, Some(200..=399)))
+        .count();
+    let (summary, color) = if sites.is_empty() {
+        ("No website watched".to_owned(), MUTED)
+    } else if up == sites.len() {
+        ("All systems up".to_owned(), "#3ecf8e")
+    } else if up == 0 {
+        ("Everything is down".to_owned(), "#ff5c5c")
+    } else {
+        (format!("{up} of {} up", sites.len()), "#f5a524")
+    };
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        r##"<text x="72" y="100" font-size="18" font-weight="600" fill="{MUTED}" letter-spacing="4">{}</text>
+<text x="70" y="150" font-size="44" font-weight="700" fill="{TEXT}">{}</text>
+<circle cx="{}" cy="132" r="9" fill="{color}"/>
+<text x="{}" y="139" font-size="20" font-weight="600" fill="{color}" text-anchor="end">{}</text>"##,
+        fit_text(&label.to_uppercase(), 40),
+        fit_text(title, 24),
+        WIDTH - 72 - text_width(&summary, 20.0) as u32 - 20,
+        WIDTH - 72,
+        fit_text(&summary, 30),
+    );
+    if sites.is_empty() {
+        let _ = write!(
+            out,
+            r##"<text x="72" y="{}" font-size="22" fill="{MUTED}">Add websites on the dashboard.</text>"##,
+            header + 44
+        );
+    }
+    let bar_w = 7;
+    let bars_right = WIDTH - 72;
+    let bars_left = bars_right - (bar_w + 3) * HISTORY_LEN as u32;
+    for (index, site) in sites.iter().enumerate() {
+        let top = header + row_h * index as u32;
+        let cy = top + row_h / 2;
+        let state = match site.status {
+            Some(200..=399) if site.latency_ms > 1500 => Beat::Slow,
+            Some(200..=399) => Beat::Up,
+            _ => Beat::Down,
+        };
+        let latency = match site.status {
+            Some(200..=399) => format!("{} ms", site.latency_ms),
+            Some(code) => format!("HTTP {code}"),
+            None => "No answer".to_owned(),
+        };
+        let _ = write!(
+            out,
+            r##"<line x1="72" y1="{top}" x2="{}" y2="{top}" stroke="{LINE}"/>
+<circle cx="84" cy="{cy}" r="8" fill="{}"/>
+<text x="106" y="{}" font-size="22" font-weight="600" fill="{TEXT}">{}</text>
+<text x="106" y="{}" font-size="15" fill="{DIM}">{}</text>
+<text x="{}" y="{}" font-size="17" font-weight="600" fill="{}" text-anchor="end">{}</text>"##,
+            WIDTH - 72,
+            state.color(),
+            cy - 3,
+            fit_text(&site.name, 20),
+            cy + 19,
+            fit_text(&site.detail, 30),
+            bars_left - 18,
+            cy + 6,
+            state.color(),
+            fit_text(&latency, 12),
+        );
+        // Older checks on the left; missing ones as empty slots.
+        let missing = HISTORY_LEN.saturating_sub(site.history.len());
+        for slot in 0..HISTORY_LEN {
+            let x = bars_left + (bar_w + 3) * slot as u32;
+            let fill = if slot < missing {
+                "#1c1c1c"
+            } else {
+                site.history[slot - missing].color()
+            };
+            let _ = write!(
+                out,
+                r##"<rect x="{x}" y="{}" width="{bar_w}" height="26" rx="2" fill="{fill}"/>"##,
+                cy - 13
+            );
+        }
+    }
+    tiles(
+        &mut out,
+        header + row_h * sites.len().max(1) as u32 + 24,
+        numbers,
+    );
+    frame(WIDTH, height, &out)
+}
+
+/// A Minecraft server: icon, name, address, online state, message of the
+/// day and numbers (players, version, ping).
+pub struct ServerCard<'a> {
+    pub label: &'a str,
+    pub name: &'a str,
+    pub address: &'a str,
+    pub online: bool,
+    pub motd: &'a [String],
+    pub icon: Option<&'a [u8]>,
+    pub numbers: &'a [(String, String)],
+}
+
+pub fn server(card: &ServerCard) -> String {
+    use base64::Engine;
+    let motd: Vec<&String> = card.motd.iter().take(2).collect();
+    let header = 250 + 30 * motd.len() as u32;
+    let tiles_h = if card.numbers.is_empty() { 0 } else { 128 };
+    let height = header + tiles_h + 40;
+    let mut out = String::new();
+    let icon = match card.icon.filter(|bytes| crate::render::image_type(bytes).is_some()) {
+        Some(bytes) => format!(
+            r##"<image href="data:image/png;base64,{}" x="72" y="76" width="112" height="112" style="image-rendering:pixelated"/>"##,
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ),
+        None => r##"<rect x="72" y="76" width="112" height="112" rx="18" fill="#121212" stroke="#2e2e2e"/><path d="M104 108 h48 v48 h-48 z M116 120 h8 v8 h-8 z M132 120 h8 v8 h-8 z M120 136 h16 v12 h-16 z" fill="#3ecf8e" fill-rule="evenodd"/>"##.to_owned(),
+    };
+    let (state, color) = if card.online {
+        ("Online", "#3ecf8e")
+    } else {
+        ("Offline", "#ff5c5c")
+    };
+    let pill_w = text_width(state, 18.0) + 46.0;
+    let _ = write!(
+        out,
+        r##"{icon}
+<text x="214" y="104" font-size="18" font-weight="600" fill="{MUTED}" letter-spacing="4">{}</text>
+<text x="212" y="152" font-size="42" font-weight="700" fill="{TEXT}">{}</text>
+<text x="214" y="186" font-size="20" fill="{MUTED}">{}</text>
+<rect x="{}" y="84" width="{pill_w}" height="38" rx="19" fill="{color}" fill-opacity="0.12" stroke="{color}" stroke-opacity="0.5"/>
+<circle cx="{}" cy="103" r="6" fill="{color}"/>
+<text x="{}" y="110" font-size="18" font-weight="600" fill="{color}">{state}</text>"##,
+        fit_text(&card.label.to_uppercase(), 34),
+        fit_text(card.name, 26),
+        fit_text(card.address, 44),
+        WIDTH as f32 - 72.0 - pill_w,
+        WIDTH as f32 - 72.0 - pill_w + 22.0,
+        WIDTH as f32 - 72.0 - pill_w + 34.0,
+    );
+    for (index, line) in motd.iter().enumerate() {
+        let _ = write!(
+            out,
+            r##"<text x="72" y="{}" font-size="21" fill="{TEXT}" fill-opacity="0.85">{}</text>"##,
+            242 + 30 * index as u32,
+            fit_text(line, 70),
+        );
+    }
+    tiles(&mut out, header, card.numbers);
+    frame(WIDTH, height, &out)
+}
+
 pub struct LeaderboardRow {
     pub name: String,
     pub level: u64,
@@ -338,6 +552,51 @@ mod tests {
     use crate::render::png;
 
     const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G'];
+
+    #[test]
+    fn integration_cards_render() {
+        let sites = vec![
+            SiteRow {
+                name: "Site".into(),
+                detail: "misty-launcher.online".into(),
+                status: Some(200),
+                latency_ms: 80,
+                history: vec![Beat::Up, Beat::Slow, Beat::Down],
+            },
+            SiteRow {
+                name: "API <x>".into(),
+                detail: "misty-launcher.online/api".into(),
+                status: None,
+                latency_ms: 10_000,
+                history: vec![Beat::Up; 50],
+            },
+        ];
+        let numbers = vec![
+            ("Version".to_owned(), "0.3.4".to_owned()),
+            ("Downloads".to_owned(), "12,345".to_owned()),
+        ];
+        let svg = status("Misty", "Status", &sites, &numbers);
+        assert!(svg.contains("1 of 2 up") && svg.contains("API &lt;x&gt;"));
+        assert!(png(&svg).unwrap().starts_with(PNG_MAGIC));
+        assert!(
+            png(&status("Misty", "Status", &[], &[]))
+                .unwrap()
+                .starts_with(PNG_MAGIC)
+        );
+        let motd = vec!["Misty SMP".to_owned(), "Survie".to_owned()];
+        for online in [true, false] {
+            let svg = server(&ServerCard {
+                label: "Minecraft server",
+                name: "Misty SMP",
+                address: "play.misty.fr",
+                online,
+                motd: &motd,
+                icon: None,
+                numbers: &numbers,
+            });
+            assert!(png(&svg).unwrap().starts_with(PNG_MAGIC));
+        }
+    }
 
     #[test]
     fn every_card_renders() {
