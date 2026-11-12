@@ -59,10 +59,19 @@ enum Puzzle {
     },
 }
 
+/// The picture of a bot's slide captcha, if one was chosen.
+fn captcha_picture(state: &AppState, slug: &str) -> Option<Vec<u8>> {
+    if !dc_core::registry::is_valid_slug(slug) {
+        return None;
+    }
+    let path = state.cfg.bots_dir.join(slug).join(render::CAPTCHA_FILE);
+    std::fs::read(path).ok()
+}
+
 impl Puzzle {
-    fn new(style: &str) -> Self {
+    fn new(style: &str, picture: Option<&[u8]>) -> Self {
         if style == "slide" {
-            let puzzle = render::slide_puzzle();
+            let puzzle = render::slide_puzzle_with(picture);
             Self::Slide {
                 x: puzzle.x,
                 y: puzzle.y,
@@ -114,7 +123,12 @@ struct Challenge {
 pub struct Challenges(Arc<Mutex<HashMap<String, Challenge>>>);
 
 impl Challenges {
-    fn create(&self, slug: &str, guild_id: &str, user_id: &str, style: &str) -> (String, Value) {
+    fn create(
+        &self,
+        (slug, guild_id, user_id): (&str, &str, &str),
+        style: &str,
+        picture: Option<&[u8]>,
+    ) -> (String, Value) {
         let mut all = self.0.lock().unwrap();
         all.retain(|_, challenge| challenge.expires > Instant::now());
         // One challenge per member and server, and a hard cap on memory.
@@ -123,7 +137,7 @@ impl Challenges {
             all.clear();
         }
         let token = random_token(24);
-        let puzzle = Puzzle::new(style);
+        let puzzle = Puzzle::new(style, picture);
         let description = puzzle.describe();
         all.insert(
             token.clone(),
@@ -315,10 +329,12 @@ pub async fn session(
     };
     let user = state.discord.oauth_user(&access_token).await?;
     let style = &config.rules.captcha_style;
-    let (challenge, description) =
-        state
-            .challenges
-            .create(&def.slug, &body.guild_id, &user.id, style);
+    let picture = captcha_picture(&state, &def.slug);
+    let (challenge, description) = state.challenges.create(
+        (&def.slug, &body.guild_id, &user.id),
+        style,
+        picture.as_deref(),
+    );
     let name = user.global_name.unwrap_or(user.username);
     let mut answer = started(challenge, description, &name);
     answer.0["bot"] = json!(def.name);
@@ -353,11 +369,11 @@ pub async fn link_session(
         .await
         .map(|user| user.global_name.unwrap_or(user.username))
         .unwrap_or_else(|_| "there".into());
+    let picture = captcha_picture(&state, &def.slug);
     let (challenge, description) = state.challenges.create(
-        &def.slug,
-        &claims.guild_id,
-        &claims.user_id,
+        (&def.slug, &claims.guild_id, &claims.user_id),
         &config.rules.captcha_style,
+        picture.as_deref(),
     );
     Ok(started(challenge, description, &name))
 }
@@ -436,9 +452,10 @@ pub async fn refresh(
     Json(body): Json<TokenBody>,
 ) -> Json<Value> {
     let slug = slug_of(&state, &slug).await.unwrap_or_default();
+    let picture = captcha_picture(&state, &slug);
     let renewed = state.challenges.with(&slug, &body.token, |challenge| {
         challenge.attempts += 1;
-        challenge.puzzle = Puzzle::new(&challenge.style);
+        challenge.puzzle = Puzzle::new(&challenge.style, picture.as_deref());
         (challenge.attempts <= MAX_ATTEMPTS).then(|| challenge.puzzle.describe())
     });
     match renewed.flatten() {
@@ -458,6 +475,7 @@ pub async fn answer(
 ) -> Result<Json<Value>, AppError> {
     let (def, _) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
     let slug = def.slug.clone();
+    let picture = captcha_picture(&state, &slug);
 
     enum Outcome {
         Passed { guild_id: String, user_id: String },
@@ -472,7 +490,7 @@ pub async fn answer(
         }
         // A wrong answer burns the captcha, so it cannot be guessed by trying.
         challenge.attempts += 1;
-        challenge.puzzle = Puzzle::new(&challenge.style);
+        challenge.puzzle = Puzzle::new(&challenge.style, picture.as_deref());
         Outcome::Wrong {
             left: MAX_ATTEMPTS.saturating_sub(challenge.attempts),
             next: challenge.puzzle.describe(),
@@ -525,8 +543,8 @@ mod tests {
     #[test]
     fn challenges_are_scoped_and_replaced() {
         let challenges = Challenges::default();
-        let (first, _) = challenges.create("sang", GUILD, "42", "text");
-        let (second, _) = challenges.create("sang", GUILD, "42", "text");
+        let (first, _) = challenges.create(("sang", GUILD, "42"), "text", None);
+        let (second, _) = challenges.create(("sang", GUILD, "42"), "text", None);
         assert_ne!(first, second);
         // A new challenge for the same member replaces the previous one.
         assert!(challenges.with("sang", &first, |_| ()).is_none());
@@ -541,7 +559,7 @@ mod tests {
     #[test]
     fn expired_challenges_are_ignored() {
         let challenges = Challenges::default();
-        let (token, _) = challenges.create("sang", GUILD, "42", "text");
+        let (token, _) = challenges.create(("sang", GUILD, "42"), "text", None);
         challenges
             .0
             .lock()
@@ -559,7 +577,7 @@ mod tests {
         assert!(!text.solved_by("AB12D"));
         assert_eq!(text.describe()["kind"], "text");
 
-        let slide = Puzzle::new("slide");
+        let slide = Puzzle::new("slide", None);
         let Puzzle::Slide { x, y, .. } = &slide else {
             panic!("expected a slide puzzle");
         };

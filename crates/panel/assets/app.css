@@ -764,3 +764,14 @@ body.activity { display: grid; place-items: center; padding: 24px; }
 .review-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .review-head .check { font-size: 12.5px; color: var(--muted); }
 @media (max-width: 640px) { .review-row.has-check { grid-template-columns: 22px minmax(0, 1fr); } .review-row.has-check .review-values { grid-column: 2; } }
+/* Commands tab: a switch per command. */
+.commands-form { display: flex; flex-direction: column; gap: 16px; }
+.commands li { position: relative; padding-left: 74px; }
+.commands li.sub { padding-top: 2px; border-top: 0; }
+.command-switch { position: absolute; left: 18px; top: 16px; display: inline-flex; cursor: pointer; }
+.command-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.command-switch input:checked + .switch-track { border-color: var(--strong); background: var(--strong); }
+.command-switch input:checked + .switch-track::after { background: var(--on-strong); transform: translateX(16px); }
+.command-switch input:focus-visible + .switch-track { outline: 2px solid var(--strong); outline-offset: 2px; }
+.commands li.off .command-line, .commands li.off p { opacity: 0.45; }
+.captcha-sample { display: block; width: 100%; max-width: 460px; height: auto; border: 1px solid var(--border-strong); border-radius: 12px; }

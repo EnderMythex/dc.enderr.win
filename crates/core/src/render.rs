@@ -396,6 +396,33 @@ fn piece_path(x: u32, y: u32) -> String {
     format!("M{x} {y} h18 a10 10 0 0 1 20 0 h18 v18 a10 10 0 0 1 0 20 v18 h-56 z")
 }
 
+/// File of a bot folder holding the picture of its slide captcha.
+pub const CAPTCHA_FILE: &str = "captcha";
+
+/// A chosen picture as the scene: zoomed and moved at random, with a few
+/// faint shapes on top, so no two puzzles are the same picture.
+fn picture_scene(bytes: &[u8]) -> Option<String> {
+    let mime = image_type(bytes)?;
+    let (w, h) = (SLIDE_WIDTH, SLIDE_HEIGHT);
+    let scale = random_range(100, 135);
+    let (sw, sh) = (w * scale / 100, h * scale / 100);
+    let (dx, dy) = (random_range(0, sw - w), random_range(0, sh - h));
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut scene = format!(
+        r##"<rect width="{w}" height="{h}" fill="#101010"/><image href="data:{mime};base64,{encoded}" x="-{dx}" y="-{dy}" width="{sw}" height="{sh}" preserveAspectRatio="xMidYMid slice"/>"##
+    );
+    for _ in 0..6 {
+        scene.push_str(&format!(
+            r##"<circle cx="{}" cy="{}" r="{}" fill="#ffffff" opacity="0.{:02}"/>"##,
+            random_range(0, w),
+            random_range(0, h),
+            random_range(10, 40),
+            random_range(6, 16)
+        ));
+    }
+    Some(scene)
+}
+
 /// Random shapes, so the hole can only be matched by looking.
 fn slide_scene() -> String {
     let (w, h) = (SLIDE_WIDTH, SLIDE_HEIGHT);
@@ -444,10 +471,16 @@ fn slide_scene() -> String {
 }
 
 pub fn slide_puzzle() -> SlidePuzzle {
+    slide_puzzle_with(None)
+}
+
+/// A slide captcha on a chosen picture (`None` or an unreadable file:
+/// random shapes).
+pub fn slide_puzzle_with(picture: Option<&[u8]>) -> SlidePuzzle {
     let (w, h) = (SLIDE_WIDTH, SLIDE_HEIGHT);
     let x = random_range(140, w - PIECE_SIZE - 14);
     let y = random_range(PIECE_RISE + 14, h - 56 - 14);
-    let scene = slide_scene();
+    let scene = picture.and_then(picture_scene).unwrap_or_else(slide_scene);
     let outline = piece_path(x, y);
     let background = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{scene}<path d="{outline}" fill="#000000" fill-opacity="0.62" stroke="#ffffff" stroke-opacity="0.75" stroke-width="2"/></svg>"##
@@ -474,6 +507,22 @@ mod tests {
     use super::*;
 
     const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G'];
+
+    #[test]
+    fn slide_puzzles_on_a_picture() {
+        let picture = png(&captcha("ABCDE")).unwrap();
+        let puzzle = slide_puzzle_with(Some(&picture));
+        assert!(puzzle.background.contains("data:image/png;base64,"));
+        assert!(puzzle.piece.contains("data:image/png;base64,"));
+        assert!(png(&puzzle.background).unwrap().starts_with(PNG_MAGIC));
+        assert!(png(&puzzle.piece).unwrap().starts_with(PNG_MAGIC));
+        // Not a picture: the random shapes.
+        assert!(
+            !slide_puzzle_with(Some(b"nope"))
+                .background
+                .contains("<image")
+        );
+    }
 
     #[test]
     fn backgrounds() {

@@ -314,6 +314,7 @@ pub async fn save_settings(
     // Saved by its own form (Card background).
     let settings = BotSettings {
         background_dim: previous.background_dim,
+        disabled_commands: previous.disabled_commands.clone(),
         ..settings
     };
     settings.save(&def.dir)?;
@@ -551,11 +552,142 @@ pub async fn bot_commands(
     State(state): State<AppState>,
     session: Session,
     Path(slug): Path<String>,
+    Query(flash): Query<Flash>,
 ) -> Page {
     let def = owned_bot(&state, &session, &slug).await?;
     let commands = dc_core::commands::listing(&def.packs);
+    let settings = BotSettings::load(&def.dir).unwrap_or_default();
     let bot = BotView::load(&state, def).await;
-    Ok(views::bot_commands(&session, &bot, &commands).into_response())
+    let page = views::bot_commands(&session, &bot, &commands, &settings, flash.text());
+    Ok(page.into_response())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct CommandsForm {
+    csrf: String,
+    /// The commands left on (ticked).
+    on: Vec<String>,
+}
+
+/// POST /bots/{slug}/commands — turns slash commands on or off. The bot
+/// registers the new set with Discord within a few seconds.
+pub async fn save_commands(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+    axum_extra::extract::Form(form): axum_extra::extract::Form<CommandsForm>,
+) -> Page {
+    session.check_csrf(&form.csrf)?;
+    let def = owned_bot(&state, &session, &slug).await?;
+    let mut names: Vec<String> = dc_core::commands::listing(&def.packs)
+        .into_iter()
+        .map(|listed| listed.command)
+        .collect();
+    names.dedup();
+    let disabled: Vec<String> = names
+        .into_iter()
+        .filter(|name| !form.on.contains(name))
+        .collect();
+    let mut settings = BotSettings::load(&def.dir).unwrap_or_default();
+    if settings.disabled_commands != disabled {
+        let action = if disabled.is_empty() {
+            "Commands: all turned on".to_owned()
+        } else {
+            format!("Commands turned off: /{}", disabled.join(", /"))
+        };
+        settings.disabled_commands = disabled;
+        settings.save(&def.dir)?;
+        tracing::info!(user = %session.user.id, bot = %def.slug, "commands changed");
+        crate::audit::record(&state, &session, &def.slug, action).await;
+    }
+    Ok(Redirect::to(&format!("/bots/{}/commands?m=commands", def.slug)).into_response())
+}
+
+#[derive(Default)]
+struct CaptchaForm {
+    csrf: String,
+    picture: Vec<u8>,
+    remove: bool,
+    from_background: bool,
+}
+
+/// POST /bots/{slug}/captcha — the picture of the slide captcha.
+pub async fn save_captcha(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+    mut multipart: Multipart,
+) -> Page {
+    let mut form = CaptchaForm::default();
+    let unreadable =
+        || AppError::BadRequest("The form could not be read. The picture must be 3 MB at most.");
+    while let Some(field) = multipart.next_field().await.map_err(|_| unreadable())? {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "picture" => form.picture = field.bytes().await.map_err(|_| unreadable())?.to_vec(),
+            "csrf" => form.csrf = field.text().await.map_err(|_| unreadable())?,
+            "remove" => form.remove = true,
+            "from_background" => form.from_background = true,
+            _ => {}
+        }
+    }
+    session.check_csrf(&form.csrf)?;
+    let def = owned_bot(&state, &session, &slug).await?;
+    let file = def.dir.join(render::CAPTCHA_FILE);
+    let picture = if form.from_background {
+        std::fs::read(def.dir.join(render::BACKGROUND_FILE)).unwrap_or_default()
+    } else {
+        form.picture
+    };
+    let done = if !picture.is_empty() {
+        if picture.len() > render::BACKGROUND_MAX_BYTES {
+            return Err(AppError::BadRequest(
+                "The picture is too large (3 MB at most).",
+            ));
+        }
+        if render::image_type(&picture).is_none() {
+            return Err(AppError::BadRequest(
+                "The picture must be a PNG, JPEG, GIF or WebP image.",
+            ));
+        }
+        let tmp = def.dir.join(format!(".{}.tmp", render::CAPTCHA_FILE));
+        std::fs::write(&tmp, &picture)?;
+        std::fs::rename(&tmp, &file)?;
+        Some("picture changed")
+    } else if form.remove && file.exists() {
+        std::fs::remove_file(&file)?;
+        Some("back to random shapes")
+    } else {
+        None
+    };
+    if let Some(done) = done {
+        tracing::info!(user = %session.user.id, bot = %def.slug, "captcha picture updated");
+        let action = format!("Slide captcha: {done}");
+        crate::audit::record(&state, &session, &def.slug, action).await;
+    }
+    Ok(Redirect::to(&format!("/bots/{}/settings?m=captcha", def.slug)).into_response())
+}
+
+/// GET /bots/{slug}/captcha/preview.png — a sample slide captcha.
+pub async fn captcha_preview(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+) -> Page {
+    let def = owned_bot(&state, &session, &slug).await?;
+    let picture = std::fs::read(def.dir.join(render::CAPTCHA_FILE)).ok();
+    let png = tokio::task::spawn_blocking(move || {
+        render::png(&render::slide_puzzle_with(picture.as_deref()).background)
+    })
+    .await
+    .map_err(std::io::Error::other)?
+    .map_err(std::io::Error::other)?;
+    let headers = [
+        (header::CONTENT_TYPE, "image/png"),
+        (header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, png).into_response())
 }
 
 /// The bot's card background with its darkening, if it has one.

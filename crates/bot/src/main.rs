@@ -174,9 +174,13 @@ async fn main() -> anyhow::Result<()> {
 /// Registers the slash commands, replacing the previous set. An application
 /// with Activities enabled also has an Entry Point command (type 4) created
 /// by Discord: it must be sent back, or Discord refuses the whole update.
+/// The commands turned off on the dashboard are left out.
 async fn register_commands(app: &App) {
     let path = format!("/applications/{}/commands", app.app_id());
-    let mut list = dc_core::commands::for_bot(&app.packs);
+    let disabled = dc_core::settings::BotSettings::load(&app.dir)
+        .map(|settings| settings.disabled_commands)
+        .unwrap_or_default();
+    let mut list = dc_core::commands::enabled(&app.packs, &disabled);
     match app.api.get(&path).await {
         Ok(existing) => {
             let entry_points = existing.as_array().into_iter().flatten();

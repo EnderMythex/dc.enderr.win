@@ -33,6 +33,8 @@ pub struct BotSettings {
     pub activity_text: String,
     /// Darkening of the background picture of the cards (0 to 90 %).
     pub background_dim: u8,
+    /// Slash commands turned off on the dashboard (top-level names).
+    pub disabled_commands: Vec<String>,
 }
 
 /// Default darkening of the background picture.
@@ -45,7 +47,15 @@ impl Default for BotSettings {
             activity_type: "none".into(),
             activity_text: String::new(),
             background_dim: BACKGROUND_DIM,
+            disabled_commands: Vec::new(),
         }
+    }
+}
+
+impl BotSettings {
+    /// Is this slash command turned on?
+    pub fn command_on(&self, name: &str) -> bool {
+        !self.disabled_commands.iter().any(|off| off == name)
     }
 }
 

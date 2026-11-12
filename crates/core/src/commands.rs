@@ -110,6 +110,17 @@ pub fn misty() -> Vec<Value> {
     ]
 }
 
+/// The commands to register: those of the bot without the ones turned off.
+pub fn enabled(packs: &[String], disabled: &[String]) -> Vec<Value> {
+    for_bot(packs)
+        .into_iter()
+        .filter(|command| {
+            let name = command["name"].as_str().unwrap_or_default();
+            !disabled.iter().any(|off| off == name)
+        })
+        .collect()
+}
+
 /// Commands of the `scanline` pack.
 pub fn scanline() -> Vec<Value> {
     vec![
@@ -139,6 +150,8 @@ pub fn scanline() -> Vec<Value> {
 /// One line per command and subcommand, for the panel:
 /// `(usage, description, options)`, e.g. `("/role add", "...", ["user", "role"])`.
 pub struct Listed {
+    /// Top-level command (`role` for `/role add`): what is turned on or off.
+    pub command: String,
     pub usage: String,
     pub description: String,
     /// Option names, `?` after the optional ones.
@@ -175,6 +188,7 @@ pub fn listing(packs: &[String]) -> Vec<Listed> {
             .unwrap_or_default();
         if subs.is_empty() {
             out.push(Listed {
+                command: name.to_owned(),
                 usage: format!("/{name}"),
                 description: command["description"].as_str().unwrap_or_default().into(),
                 options: options_of(&command),
@@ -183,6 +197,7 @@ pub fn listing(packs: &[String]) -> Vec<Listed> {
         }
         for sub in subs {
             out.push(Listed {
+                command: name.to_owned(),
                 usage: format!("/{name} {}", sub["name"].as_str().unwrap_or_default()),
                 description: sub["description"].as_str().unwrap_or_default().into(),
                 options: options_of(sub),
@@ -620,6 +635,14 @@ mod tests {
         let total = names.len();
         names.dedup();
         assert_eq!(names.len(), total, "duplicate command name");
+    }
+
+    #[test]
+    fn turned_off_commands_are_not_registered() {
+        let all = for_bot(&[]).len();
+        let some = enabled(&[], &["role".to_owned(), "giveaway".to_owned()]);
+        assert_eq!(some.len(), all - 2);
+        assert!(!some.iter().any(|c| c["name"] == "role"));
     }
 
     #[test]

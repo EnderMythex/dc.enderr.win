@@ -220,6 +220,12 @@ pub fn apply_background(app: &App) {
 pub async fn watch(app: Arc<App>) {
     let settings_path = app.dir.join(dc_core::settings::FILE_NAME);
     let mut settings_seen = modified(&settings_path);
+    let disabled = || {
+        BotSettings::load(&app.dir)
+            .map(|s| s.disabled_commands)
+            .unwrap_or_default()
+    };
+    let mut commands_off = disabled();
     let background_path = app.dir.join(dc_core::render::BACKGROUND_FILE);
     let mut background_seen = modified(&background_path);
     apply_background(&app);
@@ -235,6 +241,12 @@ pub async fn watch(app: Arc<App>) {
         if settings_changed {
             settings_seen = settings_now;
             apply_presence(&app);
+            // Commands turned on or off on the dashboard: registered again.
+            let now_off = disabled();
+            if now_off != commands_off && app.identity.get().is_some() {
+                commands_off = now_off;
+                crate::register_commands(&app).await;
+            }
         }
         // The darkening lives in settings.json, the picture in its own file.
         if settings_changed || background_now != background_seen {

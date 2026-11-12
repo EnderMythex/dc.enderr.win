@@ -308,6 +308,14 @@ async fn command(ctx: &Ctx) {
     let options = Options::parse(&ctx.data);
     let name = str_of(&ctx.data, "name");
 
+    // Turned off on the dashboard (Discord may still show it for a moment).
+    if !dc_core::settings::BotSettings::load(&ctx.app.dir).is_ok_and(|s| s.command_on(name)) {
+        let text = "This command is turned off on this bot.";
+        return ctx
+            .reply(Msg::warning("Unavailable", text).ephemeral())
+            .await;
+    }
+
     // Commands open to every member.
     match name {
         "rank" => return xp::rank(ctx, &options).await,

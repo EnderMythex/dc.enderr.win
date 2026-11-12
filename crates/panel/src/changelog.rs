@@ -11,6 +11,15 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-12-captcha-commands",
+        date: "2026-11-12",
+        title: "Your own captcha picture, commands on and off",
+        items: &[
+            "Slide captcha: choose its picture in Settings (or reuse the card background); each captcha zooms and moves it at random.",
+            "Commands tab: a switch per command. A command turned off disappears from Discord on every server within a few seconds.",
+        ],
+    },
+    Entry {
         id: "2026-11-12-light-theme",
         date: "2026-11-12",
         title: "Light theme, patch notes, choose what an import changes",

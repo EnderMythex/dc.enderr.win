@@ -149,7 +149,10 @@ fn app(state: AppState) -> Router {
             get(guilds::preview),
         )
         .route("/bots/{slug}/logs", get(routes::bot_logs))
-        .route("/bots/{slug}/commands", get(routes::bot_commands))
+        .route(
+            "/bots/{slug}/commands",
+            get(routes::bot_commands).post(routes::save_commands),
+        )
         .route(
             "/bots/{slug}/background",
             // Room for a 3 MB picture and the rest of the form.
@@ -158,6 +161,14 @@ fn app(state: AppState) -> Router {
         .route(
             "/bots/{slug}/background/{image}",
             get(routes::background_preview),
+        )
+        .route(
+            "/bots/{slug}/captcha",
+            post(routes::save_captcha).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/bots/{slug}/captcha/preview.png",
+            get(routes::captcha_preview),
         )
         .route(
             "/bots/{slug}/settings",

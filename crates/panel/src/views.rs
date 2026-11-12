@@ -103,6 +103,10 @@ pub fn flash_text(code: &str) -> Option<&'static str> {
         "profile" => "Profile updated. Discord can take a minute to show it everywhere.",
         "reset" => "All settings of this server were reset.",
         "background" => "Card background saved. The bot uses it within a few seconds.",
+        "captcha" => "Slide captcha picture saved. New captchas use it right away.",
+        "commands" => {
+            "Commands saved. The bot updates them on Discord within a few seconds; Discord can take a moment to show the change."
+        }
         _ => return None,
     })
 }
@@ -913,6 +917,37 @@ pub fn bot_settings(
                 button.btn.primary type="submit" { "Save background" }
             }
         }
+        @let has_captcha = bot.def.dir.join(dc_core::render::CAPTCHA_FILE).is_file();
+        form.card.form method="post" enctype="multipart/form-data" data-track
+            action={ "/bots/" (bot.def.slug) "/captcha" } {
+            (csrf_field(session))
+            h2 { "Slide captcha picture" }
+            p.muted {
+                "The picture of the slide captcha (Verification → Slide, on the website and in the Activity). "
+                "Each captcha zooms and moves it at random and adds a few faint shapes, so no two are the same."
+            }
+            img.captcha-sample src={ "/bots/" (bot.def.slug) "/captcha/preview.png" } alt="Sample slide captcha" width="460" height="220" loading="lazy";
+            div.field {
+                label for="captcha_picture" { "New picture" }
+                input #captcha_picture type="file" name="picture" accept="image/png,image/jpeg,image/gif,image/webp";
+                p.hint { "PNG, JPEG, GIF or WebP, 3 MB at most. A busy, detailed picture makes the hole harder to spot for robots (about 460 × 220 or larger)." }
+            }
+            @if has_background {
+                label.check {
+                    input type="checkbox" name="from_background" value="on";
+                    span { "Use the card background picture" }
+                }
+            }
+            @if has_captcha {
+                label.check {
+                    input type="checkbox" name="remove" value="on";
+                    span { "Remove the picture (back to random shapes)" }
+                }
+            }
+            div.form-actions {
+                button.btn.primary type="submit" { "Save captcha picture" }
+            }
+        }
     };
     bot_page(session, bot, Tab::Settings, flash, content)
 }
@@ -922,12 +957,23 @@ pub fn bot_commands(
     session: &Session,
     bot: &BotView,
     commands: &[dc_core::commands::Listed],
+    settings: &dc_core::settings::BotSettings,
+    flash: Option<&str>,
 ) -> Markup {
     let group = |public: bool| {
         html! {
             ul.commands {
-                @for command in commands.iter().filter(|c| c.public == public) {
-                    li {
+                @for (index, command) in commands.iter().enumerate().filter(|(_, c)| c.public == public) {
+                    @let first = index == 0 || commands[index - 1].command != command.command;
+                    @let on = settings.command_on(&command.command);
+                    li.off[!on].sub[!first] {
+                        @if first {
+                            label.command-switch title={ "Turn /" (command.command) " on or off" } {
+                                input type="checkbox" name="on" value=(command.command) checked[on]
+                                    aria-label={ "/" (command.command) " on" };
+                                span.switch-track aria-hidden="true" {}
+                            }
+                        }
                         div.command-line {
                             code.command-name { (command.usage) }
                             @for option in &command.options {
@@ -944,25 +990,35 @@ pub fn bot_commands(
             }
         }
     };
+    let off = settings.disabled_commands.len();
     let content = html! {
-        section.card.flush {
-            div.card-head { h2 { "Everyone" } }
-            (group(true))
-        }
-        section.card.flush {
-            div.card-head { h2 { "Bot admins" } }
-            p.hint.commands-hint {
-                "The server owner, members with the Administrator permission, the bot's owners and the "
-                "admins of the server's Admins section (or added with /ownerbot)."
+        form.commands-form method="post" action={ "/bots/" (bot.def.slug) "/commands" } data-track {
+            (csrf_field(session))
+            section.card.flush {
+                div.card-head { h2 { "Everyone" } }
+                (group(true))
             }
-            (group(false))
-        }
-        p.hint {
-            "Type / in a channel of the server to use them. Options in grey are optional. "
-            "Moderation commands only work on members below the bot's role."
+            section.card.flush {
+                div.card-head { h2 { "Bot admins" } }
+                p.hint.commands-hint {
+                    "The server owner, members with the Administrator permission, the bot's owners and the "
+                    "admins of the server's Admins section (or added with /ownerbot)."
+                }
+                (group(false))
+            }
+            p.hint {
+                "Type / in a channel of the server to use them. Options in grey are optional. "
+                "Moderation commands only work on members below the bot's role. "
+                "A command turned off disappears from Discord on every server"
+                @if off > 0 { " (" (off) " off now)" }
+                ". Everything stays configurable on this dashboard whatever is turned off."
+            }
+            div.form-actions {
+                button.btn.primary type="submit" { "Save" }
+            }
         }
     };
-    bot_page(session, bot, Tab::Commands, None, content)
+    bot_page(session, bot, Tab::Commands, flash, content)
 }
 
 // ---------------------------------------------------------------- server configuration
