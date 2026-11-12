@@ -20,10 +20,7 @@ const MAX_ATTEMPTS: u32 = 3;
 /// the verification has no channel of its own.
 pub fn panel(config: &GuildConfig) -> Msg {
     let rules = &config.rules;
-    let mut children = vec![
-        ui::text(format!("# {}", rules.title)),
-        ui::text(rules.text.clone()),
-    ];
+    let mut children = vec![ui::text(rules.text.clone())];
     if rules.verify_under_rules() {
         children.push(ui::separator());
         children.push(ui::section_button(
@@ -31,16 +28,16 @@ pub fn panel(config: &GuildConfig) -> Msg {
             ui::button(ui::STYLE_SUCCESS, "Verify", "verify:start"),
         ));
     }
-    Msg::card(ui::WHITE, children)
+    ui::panel_card(&rules.look, &rules.title, children)
 }
 
 /// The verification message, when it has a channel of its own.
 pub fn verify_panel(config: &GuildConfig) -> Msg {
     let rules = &config.rules;
-    Msg::card(
-        ui::WHITE,
+    ui::panel_card(
+        &rules.verify_look,
+        &rules.verify_title,
         vec![
-            ui::text(format!("# {}", rules.verify_title)),
             ui::text(rules.verify_text.clone()),
             ui::separator(),
             ui::row(vec![ui::emoji_button(
@@ -383,5 +380,14 @@ mod tests {
         );
         let own = verify_panel(&config).payload().to_string();
         assert!(own.contains("verify:start") && own.contains("Verification"));
+
+        // A banner and a color: the title is drawn, the side is colored.
+        config.rules.look.banner = true;
+        config.rules.look.color = "#6f9cff".into();
+        let banner = panel(&config);
+        let text = banner.payload().to_string();
+        assert!(text.contains("attachment://banner.png") && !text.contains("# Server rules"));
+        assert_eq!(banner.payload()["components"][0]["accent_color"], 0x6F9CFF);
+        assert!(banner.fingerprint().contains("Server rules"));
     }
 }

@@ -177,6 +177,12 @@ pub fn sections(state: &Value, guild_id: &str) -> Result<(Map<String, Value>, St
             "verify_title": pick(french, "Vérification", "Verification"),
             "verify_text": pick(french, "Clique sur le bouton pour accéder au serveur.", "Click the button to access the server."),
             "verification": mode,
+            "look": {
+                "color": "#6f9cff",
+                "banner": true,
+                "label": pick(french, "Bienvenue", "Welcome"),
+                "subtitle": pick(french, "Lis les règles puis vérifie-toi pour accéder au serveur.", "Read the rules, then verify yourself to access the server."),
+            },
             "verified_role": id(&verify["role"]),
             "remove_role": id(&verify["remove"]),
             "captcha_style": "text",
@@ -234,6 +240,12 @@ pub fn sections(state: &Value, guild_id: &str) -> Result<(Map<String, Value>, St
             "max_open": 1,
             // Misty asked for the request in a form before opening.
             "questions": flag(tickets, "ask_reason", true),
+            "look": {
+                "color": "#6f9cff",
+                "banner": true,
+                "label": "Support",
+                "subtitle": pick(french, "Choisis une catégorie : un salon privé s'ouvre avec le staff.", "Pick a category: a private channel opens with the staff."),
+            },
         }),
     );
 
@@ -248,6 +260,7 @@ pub fn sections(state: &Value, guild_id: &str) -> Result<(Map<String, Value>, St
             "prereleases": flag(releases, "prereleases", false),
             "download_url": format!("{SITE}/download/setup"),
             "website": format!("{SITE}/"),
+            "look": { "color": "#6f9cff" },
         }),
     );
 
@@ -344,6 +357,8 @@ mod tests {
         assert_eq!(config.welcome.auto_roles, vec!["1474887049726267009"]);
         assert_eq!(config.tickets.topics, vec!["Bug"]);
         assert!(config.tickets.questions);
+        assert!(config.rules.look.banner && config.rules.look.color == "#6f9cff");
+        assert_eq!(config.releases.look.color_or(0), 0x6F9CFF);
         assert_eq!(config.tickets.staff_roles, vec!["1474887049726267012"]);
         assert!(config.logs.enabled && config.logs.members && !config.logs.message_delete);
         assert_eq!(config.minecraft.name, "Misty SMP");

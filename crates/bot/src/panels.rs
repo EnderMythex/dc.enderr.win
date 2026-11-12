@@ -38,7 +38,7 @@ pub async fn sync_one(app: &App, guild_id: &str, kind: &str, wanted: Option<(Str
         }
         return;
     };
-    let hash = sha256_hex(&msg.payload().to_string());
+    let hash = sha256_hex(&msg.fingerprint());
 
     if let Some(panel) = &existing {
         if panel.channel_id == channel {

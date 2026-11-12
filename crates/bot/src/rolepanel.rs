@@ -16,7 +16,7 @@ pub const OLD_PREFIX: &str = "role-toggle:";
 
 pub fn panel(config: &GuildConfig) -> Msg {
     let panel = &config.role_panel;
-    let mut children = vec![ui::text(format!("### {}", panel.title))];
+    let mut children = Vec::new();
     for (index, button) in panel.buttons.iter().enumerate() {
         if index > 0 {
             children.push(ui::separator());
@@ -35,7 +35,7 @@ pub fn panel(config: &GuildConfig) -> Msg {
     }
     children.push(ui::separator());
     children.push(ui::text("-# Click a button to take or drop the role."));
-    Msg::card(ui::WHITE, children)
+    ui::panel_card(&panel.look, &panel.title, children)
 }
 
 /// A button of the panel: toggles the role.

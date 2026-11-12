@@ -251,6 +251,13 @@
     bar.classList.add('shake');
   });
 
+  // ------------------------------------------------------------ previews
+
+  // Side color of the Discord previews (set from data-accent: no inline style).
+  document.querySelectorAll('[data-accent]').forEach((box) => {
+    if (/^#[0-9a-f]{6}$/.test(box.dataset.accent)) box.style.borderLeftColor = box.dataset.accent;
+  });
+
   // ------------------------------------------------------------ retry
 
   // Discord asked to slow down: the error page reloads after a few seconds.

@@ -269,6 +269,34 @@ pub fn settings(label: &str, title: &str, description: &str, rows: &[Row]) -> St
     frame(WIDTH, height, &out)
 }
 
+/// Banner in the style of the Misty bot: a small label, a large title and a
+/// subtitle on the bot's card background, with a colored bar at the bottom.
+pub fn hero(label: &str, title: &str, subtitle: &str, accent: u32) -> String {
+    let height = 250;
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        r##"<text x="72" y="98" font-size="17" font-weight="600" fill="#9cc0ff" letter-spacing="4">{}</text>
+<text x="70" y="152" font-size="46" font-weight="700" fill="{TEXT}">{}</text>"##,
+        fit_text(&label.to_uppercase(), 48),
+        fit_text(title, 34),
+    );
+    if !subtitle.is_empty() {
+        let _ = write!(
+            out,
+            r##"<text x="72" y="192" font-size="21" fill="{MUTED}">{}</text>"##,
+            fit_text(subtitle, 70)
+        );
+    }
+    let _ = write!(
+        out,
+        r##"<rect x="28" y="{}" width="{}" height="5" fill="#{accent:06x}"/>"##,
+        height - 33,
+        WIDTH - 56
+    );
+    frame(WIDTH, height, &out)
+}
+
 /// State of a website at one check of the status panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -560,6 +588,23 @@ mod tests {
     use crate::render::png;
 
     const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G'];
+
+    #[test]
+    fn heroes_render() {
+        let svg = hero(
+            "Welcome",
+            "Server rules",
+            "Read the rules <then> verify.",
+            0x6F9CFF,
+        );
+        assert!(svg.contains("WELCOME") && svg.contains("#6f9cff") && svg.contains("&lt;then&gt;"));
+        assert!(png(&svg).unwrap().starts_with(PNG_MAGIC));
+        assert!(
+            png(&hero("", "Title", "", 0))
+                .unwrap()
+                .starts_with(PNG_MAGIC)
+        );
+    }
 
     #[test]
     fn integration_cards_render() {

@@ -155,6 +155,11 @@ pub struct GuildForm {
     description: String,
     show_players: Option<String>,
     questions: Option<String>,
+    custom_color: Option<String>,
+    color: String,
+    banner: Option<String>,
+    look_label: String,
+    look_subtitle: String,
     enabled: Option<String>,
     users: String,
     roles: Vec<String>,
@@ -233,10 +238,34 @@ fn number(text: &str, fallback: u32) -> u32 {
     text.trim().parse().unwrap_or(fallback)
 }
 
+/// The look fields of a panel section.
+fn look_of(form: &GuildForm) -> dc_core::guild::Look {
+    dc_core::guild::Look {
+        color: if form.custom_color.is_some() {
+            form.color.clone()
+        } else {
+            String::new()
+        },
+        banner: form.banner.is_some(),
+        label: form.look_label.clone(),
+        subtitle: form.look_subtitle.clone(),
+    }
+}
+
 /// Copies the submitted fields of one section into the configuration.
 /// Out-of-range or malformed values are fixed by `GuildConfig::sanitize`.
 fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
     let enabled = form.enabled.is_some();
+    let look = look_of(&form);
+    match module {
+        "rules" => config.rules.look = look,
+        "verification" => config.rules.verify_look = look,
+        "tickets" => config.tickets.look = look,
+        "roles" => config.role_panel.look = look,
+        "releases" => config.releases.look.color = look.color,
+        "github" => config.github.color = look.color,
+        _ => {}
+    }
     match module {
         "admins" => {
             config.admins.users = words(&form.users);
@@ -569,6 +598,123 @@ fn merge_import(
     Ok((config, imported))
 }
 
+/// Name of a section of the settings file, as on the dashboard.
+fn section_name(key: &str) -> String {
+    let name = match key {
+        "lock_url" => "Link lock",
+        "anti_scam" => "Anti-scam",
+        "role_panel" => "Role panel",
+        "xp" => "Levels",
+        "rules" => "Rules and verification",
+        "github" => "GitHub activity",
+        "status" => "Status panel",
+        "minecraft" => "Minecraft server",
+        "assistant" => "AI assistant",
+        "reminders" => "Safety reminders",
+        other => return capitalized(other),
+    };
+    name.to_owned()
+}
+
+fn capitalized(text: &str) -> String {
+    let text = text.replace('_', " ");
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// A setting as shown in the review: ids as channel and role names.
+fn shown(value: &Value, context: &GuildContext) -> String {
+    let name = |id: &str| {
+        if let Some(channel) = context.channels.iter().find(|c| c.id == id) {
+            format!("#{}", channel.name)
+        } else if let Some(role) = context.roles.iter().find(|r| r.id == id) {
+            format!("@{}", role.name)
+        } else {
+            id.to_owned()
+        }
+    };
+    let text = match value {
+        Value::Null => "—".to_owned(),
+        Value::Bool(on) => if *on { "On" } else { "Off" }.to_owned(),
+        Value::String(s) if s.is_empty() => "—".to_owned(),
+        Value::String(s) if dc_core::is_snowflake(s) => name(s),
+        Value::String(s) => s.replace('\n', " ⏎ "),
+        Value::Array(items) if items.is_empty() => "—".to_owned(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                // Buttons, links, websites: their label or name.
+                Value::Object(map) => ["label", "name", "role", "url"]
+                    .iter()
+                    .find_map(|key| map.get(*key).map(|v| shown(v, context)))
+                    .unwrap_or_else(|| item.to_string()),
+                other => shown(other, context),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        other => other.to_string(),
+    };
+    if text.chars().count() > 160 {
+        format!("{}…", text.chars().take(159).collect::<String>())
+    } else {
+        text
+    }
+}
+
+/// Every leaf setting of a section: `(path, value)`.
+fn leaves(prefix: &str, value: &Value, out: &mut Vec<(String, Value)>) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                let path = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix} · {key}")
+                };
+                leaves(&path, inner, out);
+            }
+        }
+        other => out.push((prefix.to_owned(), other.clone())),
+    }
+}
+
+/// The settings an import changes, section by section.
+fn changes(
+    before: &GuildConfig,
+    after: &GuildConfig,
+    sections: &[String],
+    context: &GuildContext,
+) -> Vec<views::Change> {
+    let (before, after) = (
+        serde_json::to_value(before).unwrap_or_default(),
+        serde_json::to_value(after).unwrap_or_default(),
+    );
+    let mut out = Vec::new();
+    for section in sections {
+        let (mut old, mut new) = (Vec::new(), Vec::new());
+        leaves("", &before[section], &mut old);
+        leaves("", &after[section], &mut new);
+        for (path, value) in new {
+            let previous = old
+                .iter()
+                .find(|(p, _)| *p == path)
+                .map_or(Value::Null, |(_, v)| v.clone());
+            if previous != value {
+                out.push(views::Change {
+                    section: section_name(section),
+                    field: capitalized(&path),
+                    before: shown(&previous, context),
+                    after: shown(&value, context),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Channel and role ids of the settings that do not exist on the server
 /// (member ids are not checked).
 fn unknown_ids(config: &GuildConfig, context: &GuildContext) -> usize {
@@ -605,8 +751,13 @@ pub async fn import(
     let unreadable =
         || AppError::BadRequest("The file could not be read. It must be 512 KB at most.");
     let (mut csrf, mut file, mut pasted) = (String::new(), String::new(), String::new());
+    let mut confirmed = false;
     while let Some(field) = form.next_field().await.map_err(|_| unreadable())? {
         let name = field.name().unwrap_or("").to_owned();
+        if name == "confirm" {
+            confirmed = true;
+            continue;
+        }
         if !matches!(name.as_str(), "csrf" | "file" | "json") {
             continue;
         }
@@ -631,6 +782,15 @@ pub async fn import(
         }
     } else {
         match merge_import(&current, &raw, &guild_id) {
+            // First step: what will change, to be confirmed.
+            Ok((config, sections)) if !confirmed => {
+                let changes = changes(&current, &config, &sections, &context);
+                let unknown = unknown_ids(&config, &context);
+                let page = views::import_review(
+                    &session, &bot, &context, &current, &changes, &raw, unknown,
+                );
+                return Ok(page.into_response());
+            }
             Ok((mut config, sections)) => {
                 config.save(&bot.def.dir, &guild_id)?;
                 tracing::warn!(
@@ -782,6 +942,39 @@ pub async fn preview(
             .map_err(|_| AppError::NotFound)
     };
     let svg = match image.as_str() {
+        // Banner of a panel, drawn from the saved settings.
+        "banner-releases.png" => {
+            let config = GuildConfig::load(&def.dir, &guild_id)?;
+            let name = config
+                .releases
+                .repo
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty());
+            let title = format!("{} v1.2.0", name.unwrap_or("Project"));
+            let color = config.releases.look.color_or(0x6F9CFF);
+            cards::hero("New version", &title, "Nov 11, 2026, 02:52 UTC", color)
+        }
+        "banner-rules.png"
+        | "banner-verification.png"
+        | "banner-tickets.png"
+        | "banner-roles.png" => {
+            let config = GuildConfig::load(&def.dir, &guild_id)?;
+            let (look, title) = match image.as_str() {
+                "banner-rules.png" => (&config.rules.look, &config.rules.title),
+                "banner-verification.png" => {
+                    (&config.rules.verify_look, &config.rules.verify_title)
+                }
+                "banner-tickets.png" => (&config.tickets.look, &config.tickets.title),
+                _ => (&config.role_panel.look, &config.role_panel.title),
+            };
+            let label = if look.label.is_empty() {
+                def.name.as_str()
+            } else {
+                look.label.as_str()
+            };
+            cards::hero(label, title, &look.subtitle, look.color_or(0xEDEDED))
+        }
         "close-dms.png" => {
             let png = dc_core::tips::CLOSE_DMS_PNG;
             return Ok(([(header::CONTENT_TYPE, "image/png")], png).into_response());
@@ -868,6 +1061,40 @@ mod tests {
         raw: &str,
     ) -> Result<(GuildConfig, Vec<String>), String> {
         merge_import(current, raw, "175928847299117063")
+    }
+
+    #[test]
+    fn import_review_lists_changes() {
+        let context = GuildContext {
+            guild: crate::discord::GuildDetail {
+                id: "1".into(),
+                name: "S".into(),
+                icon: None,
+                approximate_member_count: None,
+            },
+            channels: vec![],
+            roles: vec![],
+        };
+        let current = GuildConfig::default();
+        let (after, sections) = merge_import_test(
+            &current,
+            r#"{"twitch":{"enabled":true,"logins":["junkocry"]},"logs":{}}"#,
+        )
+        .unwrap();
+        let list = changes(&current, &after, &sections, &context);
+        let twitch: Vec<_> = list.iter().filter(|c| c.section == "Twitch").collect();
+        assert!(
+            twitch
+                .iter()
+                .any(|c| c.field == "Enabled" && c.before == "Off" && c.after == "On")
+        );
+        assert!(
+            twitch
+                .iter()
+                .any(|c| c.field == "Logins" && c.before == "—" && c.after == "junkocry")
+        );
+        // An empty section changes nothing.
+        assert!(!list.iter().any(|c| c.section == "Logs"));
     }
 
     #[test]

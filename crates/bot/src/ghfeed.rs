@@ -8,7 +8,7 @@
 
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use dc_core::{cards::Tone, guild::Releases};
+use dc_core::guild::Releases;
 
 use crate::{
     app::App,
@@ -97,20 +97,40 @@ fn download_link(settings: &Releases, release: &Release) -> String {
     }
 }
 
-/// Announcement of a version: banner, notes, files, buttons. `mention`:
-/// the role of the settings is pinged (announcements, not `/release`).
+/// `2026-11-11T02:52:10Z` -> `Nov 11, 2026, 02:52 UTC`.
+fn release_date(iso: Option<&str>) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let Some(iso) = iso.filter(|iso| github::unix(Some(iso)).is_some()) else {
+        return String::new();
+    };
+    let month = iso
+        .get(5..7)
+        .and_then(|m| m.parse::<usize>().ok())
+        .and_then(|m| MONTHS.get(m.wrapping_sub(1)))
+        .copied()
+        .unwrap_or("");
+    let day = iso.get(8..10).unwrap_or("").trim_start_matches('0');
+    format!(
+        "{month} {day}, {}, {} UTC",
+        iso.get(..4).unwrap_or(""),
+        iso.get(11..16).unwrap_or("")
+    )
+}
+
+/// Announcement of a version, like the Misty bot: banner (version and
+/// date), notes, files, buttons; the role is mentioned above the card.
+/// `mention`: announcements, not `/release`.
 pub fn release_card(settings: &Releases, repo: &str, release: &Release, mention: bool) -> Msg {
     let title = format!("{} {}", repo_name(repo), release.tag_name);
-    let subtitle = if release.prerelease {
+    let label = if release.prerelease {
         "Pre-release"
     } else {
         "New version"
     };
     let mut extra = Vec::new();
     let role = settings.role.as_deref().filter(|_| mention);
-    if let Some(role) = role {
-        extra.push(ui::text(format!("<@&{role}>")));
-    }
     let body = release
         .body
         .as_deref()
@@ -126,13 +146,24 @@ pub fn release_card(settings: &Releases, repo: &str, release: &Release, mention:
         ui::link_button("Download", &download_link(settings, release)),
         ui::link_button("Release notes", &release.html_url),
     ]));
-    let tone = if release.prerelease {
-        Tone::Warning
+    let default = if release.prerelease {
+        ui::AMBER
     } else {
-        Tone::Announce
+        0x6F9CFF
     };
-    let mut msg = Msg::banner(tone, &title, subtitle, extra);
-    msg.ping_roles = role.map(str::to_owned).into_iter().collect();
+    let color = settings.look.color_or(default);
+    let svg = dc_core::cards::hero(
+        label,
+        &title,
+        &release_date(release.published_at.as_deref()),
+        color,
+    );
+    let fallback = vec![ui::text(format!("# {}", ui::escape(&title)))];
+    let mut msg = Msg::with_image(color, "release.png", svg, extra, fallback);
+    if let Some(role) = role {
+        msg = msg.prepend(ui::text(format!("<@&{role}>")));
+        msg.ping_roles = vec![role.to_owned()];
+    }
     msg
 }
 
@@ -565,9 +596,13 @@ async fn check_activity(app: &App) {
             }
         };
         for activity in activities {
-            let msg = card(&activity);
+            let card = card(&activity);
             for (guild, config) in &servers {
                 let feed = &config.github;
+                let msg = match dc_core::guild::color_value(&feed.color) {
+                    Some(color) => card.clone().recolor(color),
+                    None => card.clone(),
+                };
                 let Some(channel) = feed.channel.as_deref() else {
                     continue;
                 };
@@ -648,6 +683,10 @@ mod tests {
         let msg = release_card(&settings, "Misty-MC/Misty", &release(false), true);
         let text = msg.payload().to_string();
         assert!(text.contains("<@&42>") && text.contains("### What's new"));
+        // The mention comes before the card, like on the Misty bot.
+        assert_eq!(msg.payload()["components"][0]["type"], 10);
+        assert_eq!(msg.payload()["components"][1]["accent_color"], 0x6F9CFF);
+        assert!(msg.fingerprint().contains("Nov 8, 2026, 10:00 UTC"));
         assert!(text.contains("9.0 MB") && text.contains("download/setup"));
         assert_eq!(msg.payload()["allowed_mentions"]["roles"][0], "42");
         let quiet = release_card(&settings, "Misty-MC/Misty", &release(true), false);

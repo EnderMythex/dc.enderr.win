@@ -35,10 +35,10 @@ pub fn panel(config: &GuildConfig) -> Msg {
             &tickets.topics,
         )
     };
-    Msg::card(
-        ui::WHITE,
+    ui::panel_card(
+        &tickets.look,
+        &tickets.title,
         vec![
-            ui::text(format!("# {}", tickets.title)),
             ui::text(tickets.text.clone()),
             ui::separator(),
             ui::row(vec![opener]),

@@ -1,0 +1,151 @@
+{
+  "bot": "misty",
+  "format": "dc.enderr.win/server-settings",
+  "note": "Settings of the former Misty bot (its data/state.json). Import it on the dashboard: Misty Bot > Servers > the Misty server > Backup.",
+  "server": {
+    "id": "1345166886207356968"
+  },
+  "settings": {
+    "github": {
+      "channel": "1569249616191291392",
+      "color": "",
+      "enabled": true,
+      "events": [
+        "issues",
+        "pull_request",
+        "push"
+      ],
+      "repos": [
+        "Misty-MC/Misty",
+        "Misty-MC/Misty-Web",
+        "Misty-MC/Misty-Bot"
+      ]
+    },
+    "logs": {
+      "channel": "1569361344262836264",
+      "channels": false,
+      "enabled": true,
+      "members": true,
+      "message_delete": false,
+      "message_edit": false,
+      "moderation": false
+    },
+    "minecraft": {
+      "address": "play.misty-launcher.online",
+      "channel": "1569127383645163682",
+      "description": "",
+      "enabled": true,
+      "name": "Misty SMP",
+      "show_players": true
+    },
+    "releases": {
+      "channel": "1569060685948784771",
+      "download_url": "https://misty-launcher.online/download/setup",
+      "enabled": true,
+      "look": {
+        "banner": false,
+        "color": "#6f9cff",
+        "label": "",
+        "subtitle": ""
+      },
+      "prereleases": true,
+      "repo": "Misty-MC/Misty",
+      "role": "1569058292603424769",
+      "website": "https://misty-launcher.online/"
+    },
+    "rules": {
+      "captcha_style": "text",
+      "channel": "1569058492864663673",
+      "enabled": true,
+      "look": {
+        "banner": true,
+        "color": "#6f9cff",
+        "label": "Welcome",
+        "subtitle": "Read the rules, then verify yourself to access the server."
+      },
+      "remove_role": "1569390684698312886",
+      "text": "**1.** Respect everyone: no insults, harassment or discrimination.\n**2.** No spam, advertising or shady links.\n**3.** Use the right channel for each topic.\n**4.** No NSFW, illegal or cheating content.\n**5.** Follow the [Discord Terms of Service](https://discord.com/terms).",
+      "title": "Server rules",
+      "verification": "web",
+      "verified_role": "1569058292603424769",
+      "verify_channel": null,
+      "verify_enabled": true,
+      "verify_look": {
+        "banner": false,
+        "color": "",
+        "label": "",
+        "subtitle": ""
+      },
+      "verify_text": "Click the button to access the server.",
+      "verify_title": "Verification"
+    },
+    "status": {
+      "channel": "1569127935690940596",
+      "enabled": true,
+      "players_url": "",
+      "repo": "Misty-MC/Misty",
+      "sites": [
+        {
+          "name": "Site",
+          "url": "https://misty-launcher.online/"
+        },
+        {
+          "name": "API",
+          "url": "https://misty-launcher.online/api/latest"
+        },
+        {
+          "name": "Docs",
+          "url": "https://misty-launcher.online/docs"
+        },
+        {
+          "name": "Shop",
+          "url": "https://misty-launcher.online/shop"
+        }
+      ]
+    },
+    "tickets": {
+      "category": "1569404161915883594",
+      "enabled": true,
+      "log_channel": "1569361344262836264",
+      "look": {
+        "banner": true,
+        "color": "#6f9cff",
+        "label": "Support",
+        "subtitle": "Pick a category: a private channel opens with the staff."
+      },
+      "max_open": 1,
+      "panel_channel": "1569404438219591781",
+      "questions": true,
+      "staff_roles": [
+        "1569058023358472426"
+      ],
+      "text": "Open a ticket to talk to the staff privately. Pick the category that matches your request, and a channel just for you opens.",
+      "title": "Need help?",
+      "topics": [
+        "Launcher help",
+        "Report a bug",
+        "Report a member",
+        "Suggest a feature",
+        "Partnership",
+        "Other"
+      ]
+    },
+    "welcome": {
+      "auto_roles": [
+        "1569390684698312886"
+      ],
+      "channel": "1569397913136791582",
+      "dm_enabled": false,
+      "dm_links": [],
+      "dm_safety": true,
+      "dm_text": "Welcome to **{server}**! Glad to have you with us.",
+      "dm_text_en": "",
+      "enabled": true,
+      "image": true,
+      "message": "Welcome {user} to **{server}**! You're member #{count}, make yourself at home and say hi.",
+      "ping_channels": [],
+      "ping_seconds": 3
+    }
+  },
+  "version": 1
+}

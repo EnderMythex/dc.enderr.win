@@ -62,6 +62,51 @@ pub struct GuildConfig {
     pub minecraft: Minecraft,
 }
 
+/// How a panel looks on Discord: the color of its side bar and an optional
+/// banner (the bot's card background with a small label, the title and a
+/// subtitle drawn on it, like the Misty bot).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Look {
+    /// `#rrggbb`; empty: the default color.
+    pub color: String,
+    pub banner: bool,
+    /// Small text above the title of the banner, e.g. "Welcome".
+    pub label: String,
+    pub subtitle: String,
+}
+
+impl Look {
+    /// The chosen color, or `fallback`.
+    pub fn color_or(&self, fallback: u32) -> u32 {
+        color_value(&self.color).unwrap_or(fallback)
+    }
+
+    fn sanitize(&mut self) {
+        self.color = parse_color(&self.color).unwrap_or_default();
+        self.label = self.label.trim().chars().take(40).collect();
+        self.subtitle = self.subtitle.trim().chars().take(120).collect();
+    }
+}
+
+/// `#ABC`, `abc123` or `#abc123` -> `#abc123`.
+pub fn parse_color(input: &str) -> Option<String> {
+    let hex = input.trim().trim_start_matches('#').to_lowercase();
+    let hex = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect(),
+        6 => hex,
+        _ => return None,
+    };
+    hex.bytes()
+        .all(|b| b.is_ascii_hexdigit())
+        .then(|| format!("#{hex}"))
+}
+
+/// `#rrggbb` -> its value; `None` when empty or invalid.
+pub fn color_value(color: &str) -> Option<u32> {
+    u32::from_str_radix(parse_color(color)?.trim_start_matches('#'), 16).ok()
+}
+
 /// Announces the new versions (GitHub releases) of a repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -79,6 +124,8 @@ pub struct Releases {
     pub download_url: String,
     /// Website button of `/download` (optional).
     pub website: String,
+    /// Side color of the announcements (the banner is always shown).
+    pub look: Look,
 }
 
 /// Commits, pull requests, issues, stars, forks and tags of repositories.
@@ -91,6 +138,8 @@ pub struct GitHubFeed {
     pub repos: Vec<String>,
     /// Among [`GITHUB_EVENTS`].
     pub events: Vec<String>,
+    /// Side color of every card; empty: one color per kind of activity.
+    pub color: String,
 }
 
 impl Default for GitHubFeed {
@@ -100,6 +149,7 @@ impl Default for GitHubFeed {
             channel: None,
             repos: Vec::new(),
             events: vec!["issues".into(), "pull_request".into(), "push".into()],
+            color: String::new(),
         }
     }
 }
@@ -263,6 +313,7 @@ pub struct RolePanel {
     pub channel: Option<String>,
     pub title: String,
     pub buttons: Vec<RoleButton>,
+    pub look: Look,
 }
 
 impl Default for RolePanel {
@@ -272,6 +323,7 @@ impl Default for RolePanel {
             channel: None,
             title: "Pick your roles".into(),
             buttons: Vec::new(),
+            look: Look::default(),
         }
     }
 }
@@ -424,6 +476,10 @@ pub struct Rules {
     pub verified_role: Option<String>,
     /// Role taken away once verified, e.g. an "Unverified" role.
     pub remove_role: Option<String>,
+    /// Look of the rules message.
+    pub look: Look,
+    /// Look of the verification message, when it has its own channel.
+    pub verify_look: Look,
     /// One of [`CAPTCHA_STYLES`], for the `activity` and `web` modes.
     pub captcha_style: String,
 }
@@ -444,6 +500,8 @@ impl Default for Rules {
             verification: "button".into(),
             verified_role: None,
             remove_role: None,
+            look: Look::default(),
+            verify_look: Look::default(),
             captcha_style: "text".into(),
         }
     }
@@ -486,6 +544,7 @@ pub struct Tickets {
     /// Optional topics offered in a menu when opening a ticket.
     pub topics: Vec<String>,
     pub max_open: u32,
+    pub look: Look,
     /// A form before the ticket opens, with questions chosen from the
     /// topic: a bug (steps, what happened, expected, every time, crash
     /// code), an idea (the idea, why, how) or a single question.
@@ -505,6 +564,7 @@ impl Default for Tickets {
                 .into(),
             topics: Vec::new(),
             max_open: 1,
+            look: Look::default(),
             questions: false,
         }
     }
@@ -768,6 +828,13 @@ impl GuildConfig {
         clean_id(&mut reminders.channel_fr);
         clean_id(&mut reminders.channel_en);
         reminders.interval_hours = reminders.interval_hours.clamp(6, 24 * 14);
+
+        self.rules.look.sanitize();
+        self.rules.verify_look.sanitize();
+        self.tickets.look.sanitize();
+        self.role_panel.look.sanitize();
+        self.releases.look.sanitize();
+        self.github.color = parse_color(&self.github.color).unwrap_or_default();
 
         let releases = &mut self.releases;
         clean_id(&mut releases.channel);
@@ -1052,6 +1119,23 @@ mod tests {
         assert_eq!(c.releases.download_url, "");
         assert_eq!(c.minecraft.address, "play.misty.fr:25565b");
         assert_eq!(c.status.repo_or(&c.releases), "Misty-MC/Misty");
+    }
+
+    #[test]
+    fn looks() {
+        assert_eq!(parse_color("#6F9CFF").as_deref(), Some("#6f9cff"));
+        assert_eq!(parse_color("abc").as_deref(), Some("#aabbcc"));
+        assert_eq!(parse_color("#12345g"), None);
+        assert_eq!(color_value("#6f9cff"), Some(0x6F9CFF));
+        let mut c = GuildConfig::default();
+        c.rules.look.color = "red".into();
+        c.tickets.look.color = "#F5B14C".into();
+        c.rules.look.subtitle = "x".repeat(500);
+        c.sanitize();
+        assert_eq!(c.rules.look.color, "");
+        assert_eq!(c.tickets.look.color_or(0), 0xF5B14C);
+        assert_eq!(c.rules.look.color_or(7), 7);
+        assert_eq!(c.rules.look.subtitle.chars().count(), 120);
     }
 
     #[test]

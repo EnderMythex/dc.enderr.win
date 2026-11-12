@@ -658,3 +658,27 @@ body.activity { display: grid; place-items: center; padding: 24px; }
 }
 .command-option.optional { color: var(--muted); border-style: dashed; }
 .commands-hint { padding: 0 20px; margin: 0 0 4px; }
+.look-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.color-input { width: 56px; height: 34px; padding: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: #000; cursor: pointer; }
+.review { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; }
+.review h3 { margin: 10px 0 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.review-row { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 16px; padding: 9px 12px; border-radius: 8px; background: var(--surface-2); }
+.review-field { color: var(--muted); font-size: 13px; }
+.review-values { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.review-before { color: #7a7a7a; text-decoration: line-through; text-decoration-color: rgba(255, 92, 92, 0.6); }
+.review-arrow { color: var(--muted); }
+.review-after { color: var(--ok); font-weight: 500; }
+@media (max-width: 640px) { .review-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.bot-list { display: flex; flex-direction: column; padding: 6px; }
+.bot-row { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border-radius: 10px; color: inherit; text-decoration: none; transition: background 0.12s; }
+.bot-row + .bot-row { border-top: 1px solid var(--border); border-top-left-radius: 0; border-top-right-radius: 0; }
+.bot-row:hover { background: var(--surface-2); }
+.bot-row:hover .chevron { color: var(--text); transform: translateX(2px); }
+.bot-row-name { display: flex; flex-direction: column; flex: none; width: 190px; min-width: 0; }
+.bot-row-name > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-row-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+@media (max-width: 720px) {
+  .bot-row { gap: 12px; }
+  .bot-row-desc { display: none; }
+  .bot-row-name { flex: 1; width: auto; }
+}

@@ -54,6 +54,8 @@ pub struct Msg {
 struct PendingImage {
     file: String,
     svg: String,
+    /// Index of the container showing the image.
+    index: usize,
     /// Replaces the first container if the image cannot be drawn.
     fallback: Value,
 }
@@ -65,7 +67,7 @@ pub fn set_bot_name(name: &str) {
     let _ = BOT_NAME.set(name.to_owned());
 }
 
-fn bot_name() -> &'static str {
+pub fn bot_name() -> &'static str {
     BOT_NAME.get().map_or("Bot", String::as_str)
 }
 
@@ -190,6 +192,7 @@ impl Msg {
             pending: Some(PendingImage {
                 file: file.to_owned(),
                 svg,
+                index: 0,
                 fallback: container(color, replacement),
             }),
             ..Self::default()
@@ -203,9 +206,36 @@ impl Msg {
         };
         match draw(pending.svg).await {
             Some(png) => self.files.insert(0, (pending.file, png)),
-            None => self.components[0] = pending.fallback,
+            None => self.components[pending.index] = pending.fallback,
         }
         self
+    }
+
+    /// A block before the cards (e.g. a role mention above an announcement).
+    pub fn prepend(mut self, component: Value) -> Self {
+        self.components.insert(0, component);
+        if let Some(pending) = &mut self.pending {
+            pending.index += 1;
+        }
+        self
+    }
+
+    /// Sets the side color of the first card.
+    pub fn recolor(mut self, color: u32) -> Self {
+        if let Some(card) = self.components.iter_mut().find(|c| c["type"] == 17) {
+            card["accent_color"] = json!(color);
+        }
+        if let Some(pending) = &mut self.pending {
+            pending.fallback["accent_color"] = json!(color);
+        }
+        self
+    }
+
+    /// What identifies the message's look, image included: a panel whose
+    /// fingerprint changed is edited.
+    pub fn fingerprint(&self) -> String {
+        let svg = self.pending.as_ref().map_or("", |p| p.svg.as_str());
+        format!("{}{svg}", self.payload())
     }
 
     /// Sends the message as a reply to another one.
@@ -265,6 +295,31 @@ impl Msg {
         }
         payload
     }
+}
+
+/// A panel (rules, verification, tickets, roles) with the look chosen on
+/// the dashboard: its side color, and either a banner (title drawn on the
+/// bot's card background) or a text title.
+pub fn panel_card(look: &dc_core::guild::Look, title: &str, children: Vec<Value>) -> Msg {
+    let color = look.color_or(WHITE);
+    let heading = text(format!("# {}", escape_title(title)));
+    if !look.banner {
+        let mut all = vec![heading];
+        all.extend(children);
+        return Msg::card(color, all);
+    }
+    let label = if look.label.is_empty() {
+        bot_name()
+    } else {
+        &look.label
+    };
+    let svg = cards::hero(label, title, &look.subtitle, color);
+    Msg::with_image(color, "banner.png", svg, children, vec![heading])
+}
+
+/// Titles keep their formatting characters but not new lines.
+fn escape_title(title: &str) -> String {
+    title.replace('\n', " ")
 }
 
 pub fn container(color: u32, children: Vec<Value>) -> Value {

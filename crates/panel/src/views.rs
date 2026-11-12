@@ -402,21 +402,20 @@ pub fn dashboard(
                 p.mono.muted { "Your Discord id: " (session.user.id) }
             }
         } @else {
-            div.grid {
+            // One line per bot: picture, name, description, state.
+            div.card.bot-list {
                 @for bot in bots {
-                    a.card.bot-card href={ "/bots/" (bot.def.slug) } {
-                        div.bot-card-top {
-                            img.avatar src=(bot_avatar(bot)) alt="" width="44" height="44";
-                            div.bot-card-text {
-                                span.bot-name { (bot.def.name) }
-                                span.mono.muted { (bot.def.slug) }
-                            }
-                            span.chevron { (icon(ICON_ARROW)) }
+                    a.bot-row href={ "/bots/" (bot.def.slug) } {
+                        img.avatar src=(bot_avatar(bot)) alt="" width="40" height="40";
+                        div.bot-row-name {
+                            span.bot-name { (bot.def.name) }
+                            span.mono.muted { (bot.def.slug) }
                         }
-                        @if let Some(description) = &bot.def.description {
-                            p.muted.clamp { (description) }
+                        span.bot-row-desc.muted {
+                            @if let Some(description) = &bot.def.description { (description) }
                         }
-                        div.bot-card-foot { (badge(&bot.status)) }
+                        (badge(&bot.status))
+                        span.chevron { (icon(ICON_ARROW)) }
                     }
                 }
             }
@@ -1098,6 +1097,38 @@ fn has_secret(bot: &BotView, key: &str) -> bool {
     dc_core::registry::read_env(&bot.def.dir, key).is_some()
 }
 
+/// Side color and banner of a panel. `banner`: the section can have a
+/// banner (not the GitHub cards).
+fn look_fields(look: &dc_core::guild::Look, banner: bool) -> Markup {
+    let custom = !look.color.is_empty();
+    let color = if custom {
+        look.color.as_str()
+    } else {
+        "#6f9cff"
+    };
+    html! {
+        h2.section-title { "Look" }
+        div.look-row {
+            label.check {
+                input type="checkbox" name="custom_color" value="on" checked[custom];
+                span { "Custom side color" }
+            }
+            input.color-input type="color" name="color" value=(color) aria-label="Side color";
+        }
+        @if banner {
+            (switch("banner", "Show a banner", "The title drawn on the bot's card background (Settings → Card background), with a small label above and a subtitle, like the Misty bot.", look.banner))
+            div.field-row {
+                (field("look_label", "Small label", "Empty: the bot's name.", html! {
+                    input #look_label type="text" name="look_label" value=(look.label) maxlength="40" placeholder="Welcome";
+                }))
+                (field("look_subtitle", "Subtitle", "", html! {
+                    input #look_subtitle type="text" name="look_subtitle" value=(look.subtitle) maxlength="120";
+                }))
+            }
+        }
+    }
+}
+
 /// GitHub works without a token, but checks less often.
 fn github_token_hint(bot: &BotView) -> Markup {
     let key = format!(
@@ -1188,6 +1219,7 @@ fn guild_fields(
                         "The verification is off (Verification section)."
                     }
                 }
+                (look_fields(&rules.look, true))
             }
         }
         "verification" => {
@@ -1217,6 +1249,7 @@ fn guild_fields(
                     input #title type="text" name="title" value=(rules.verify_title) maxlength="80" required;
                 }))
                 (textarea("text", "Text of the verification message", "", &rules.verify_text, 3, 1800))
+                (look_fields(&rules.verify_look, true))
                 (choice("verification", "How members verify", "Website gives each member a personal link to a captcha page. The Activity opens it inside Discord but needs a one-time setup by the administrator; until then members get the image captcha.", &modes, &rules.verification))
                 (choice("captcha_style", "Captcha on the website and in the Activity", "", &styles, &rules.captcha_style))
                 (field("role", "Verified role", "Given once verified. Use it to unlock the rest of the server.", html! {
@@ -1242,6 +1275,7 @@ fn guild_fields(
                 (textarea("text", "Panel text", "", &tickets.text, 4, 1800))
                 (textarea("topics", "Topics", "Optional, one per line (10 max). Members then pick a topic from a menu.", &tickets.topics.join("\n"), 4, 900))
                 (number_input("max_open", "Open tickets per member", "", tickets.max_open, 1, 5))
+                (look_fields(&tickets.look, true))
                 (switch("questions", "Ask questions before opening", "A form opens first; the answers are posted in the ticket. Topics with \"bug\" in their name ask for the steps, what happened, what was expected, whether it happens every time and a crash code; topics about an idea or a feature ask for the idea, why and how; the others ask for the request. In French when the topic is in French.", tickets.questions))
             }
         }
@@ -1318,6 +1352,7 @@ fn guild_fields(
                 (field("title", "Title", "", html! {
                     input #title type="text" name="title" value=(panel.title) maxlength="80" required;
                 }))
+                (look_fields(&panel.look, true))
                 fieldset.checks {
                     legend { "Buttons" }
                     p.hint { "Up to 10. Roles with moderation or admin permissions are never given, and the bot's role must be above these roles. Leave the role empty to skip a row." }
@@ -1403,6 +1438,8 @@ fn guild_fields(
                 @if bot.def.packs.iter().any(|p| p == dc_core::commands::MISTY) {
                     p.hint { "/release and /download show the latest version of this repository." }
                 }
+                (look_fields(&releases.look, false))
+                p.hint { "Default: blue, amber for pre-releases. The banner shows the version and its date." }
             }
         }
         "github" => {
@@ -1426,6 +1463,8 @@ fn guild_fields(
                 (channel_select("channel", "Channel", "", text_channels(), &feed.channel))
                 (textarea("repos", "Repositories", "Public repositories, one per line (10 at most): owner/name or their GitHub link.", &feed.repos.join("\n"), 4, 2000))
                 (checks("events", "What to post", "", &items, &feed.events))
+                (look_fields(&dc_core::guild::Look { color: feed.color.clone(), ..Default::default() }, false))
+                p.hint { "Default: one color per kind of activity (green opened, purple merged, red closed…)." }
             }
         }
         "status" => {
@@ -1497,6 +1536,11 @@ fn fill_welcome(template: &str, name: &str, server: &str, count: u64) -> String 
 
 /// Mock of a message of the bot, as it appears on Discord.
 fn discord_message(bot: &BotView, blocks: Markup) -> Markup {
+    discord_message_colored(bot, blocks, None)
+}
+
+/// Same, with the side color of the card.
+fn discord_message_colored(bot: &BotView, blocks: Markup, accent: Option<u32>) -> Markup {
     let name = match &bot.identity {
         Some(user) => user.username.as_str(),
         None => bot.def.name.as_str(),
@@ -1506,10 +1550,28 @@ fn discord_message(bot: &BotView, blocks: Markup) -> Markup {
             img.avatar src=(bot_avatar(bot)) alt="" width="40" height="40";
             div.dmsg-body {
                 div.dmsg-head { strong { (name) } span.dtag { "APP" } }
-                div.dbox { (blocks) }
+                // Applied by app.js: the CSP allows no inline style.
+                div.dbox data-accent=[accent.map(|c| format!("#{c:06x}"))] { (blocks) }
             }
         }
     }
+}
+
+/// The banner of a panel in the preview, or its text title.
+fn look_heading(look: &dc_core::guild::Look, title: &str, base: &str, module: &str) -> Markup {
+    html! {
+        @if look.banner {
+            img.dimg src={ (base) "/preview/banner-" (module) ".png?v=" (dc_core::crypto::sha256_hex(&format!("{look:?}{title}"))[..8]) }
+                alt="Banner" width="1000" height="250" loading="lazy";
+        } @else {
+            p.dtitle { (title) }
+        }
+    }
+}
+
+thread_local! {
+    /// Side color of the preview being drawn (set by `guild_preview`).
+    static PREVIEW_ACCENT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
 /// What a section posts on Discord, built from the saved settings, and the
@@ -1554,8 +1616,9 @@ fn guild_preview(
         }
         "roles" => {
             let panel = &config.role_panel;
+            PREVIEW_ACCENT.with(|a| a.set(Some(panel.look.color_or(0xEDEDED))));
             let blocks = html! {
-                p.dtitle.small { (panel.title) }
+                (look_heading(&panel.look, &panel.title, base, "roles"))
                 @if panel.buttons.is_empty() {
                     p.dtext.muted { "Add buttons and save to see them here." }
                 }
@@ -1611,10 +1674,12 @@ fn guild_preview(
                 .role
                 .as_deref()
                 .and_then(|id| context.roles.iter().find(|r| r.id == id));
+            PREVIEW_ACCENT.with(|a| a.set(Some(releases.look.color_or(0x6F9CFF))));
+            let version = dc_core::crypto::sha256_hex(&format!("{}{name}", releases.look.color));
             let blocks = html! {
-                p.dtitle { (name) " v1.2.0" }
-                p.dsmall { "New version" }
                 @if let Some(role) = role { p.dtext { span.dmention { "@" (role.name) } } }
+                img.dimg src={ (base) "/preview/banner-releases.png?v=" (&version[..8]) }
+                    alt="Banner" width="1000" height="250" loading="lazy";
                 p.dtext { "The notes of the release, as written on GitHub." }
                 p.dsmall { "Setup.exe 9.0 MB · Portable.zip 10.0 MB" }
                 div.dbtns { span.dbtn { "Download ↗" } span.dbtn { "Release notes ↗" } }
@@ -1632,6 +1697,8 @@ fn guild_preview(
                 .repos
                 .first()
                 .map_or("owner/name", String::as_str);
+            let accent = dc_core::guild::color_value(&config.github.color).unwrap_or(0x6F9CFF);
+            PREVIEW_ACCENT.with(|a| a.set(Some(accent)));
             let blocks = html! {
                 p.dsmall { (repo) " · just now" }
                 p.dtext { strong { "octocat" } " pushed " strong { "2" } " commits to " code { "main" } }
@@ -1688,15 +1755,17 @@ fn guild_preview(
         "rules" | "verification" => {
             let rules = &config.rules;
             let own = module == "verification" && !rules.verify_under_rules();
+            let look = if own { &rules.verify_look } else { &rules.look };
+            PREVIEW_ACCENT.with(|a| a.set(Some(look.color_or(0xEDEDED))));
             let blocks = if own {
                 html! {
-                    p.dtitle { (rules.verify_title) }
+                    (look_heading(&rules.verify_look, &rules.verify_title, base, "verification"))
                     p.dtext { (rules.verify_text) }
                     span.dbtn.ok { "✅ Verify" }
                 }
             } else {
                 html! {
-                    p.dtitle { (rules.title) }
+                    (look_heading(&rules.look, &rules.title, base, "rules"))
                     p.dtext { (rules.text) }
                     @if rules.verify_under_rules() {
                         div.dsplit {
@@ -1729,8 +1798,9 @@ fn guild_preview(
         }
         "tickets" => {
             let tickets = &config.tickets;
+            PREVIEW_ACCENT.with(|a| a.set(Some(tickets.look.color_or(0xEDEDED))));
             let blocks = html! {
-                p.dtitle { (tickets.title) }
+                (look_heading(&tickets.look, &tickets.title, base, "tickets"))
                 p.dtext { (tickets.text) }
                 @if tickets.topics.is_empty() {
                     span.dbtn { "Open a ticket" }
@@ -1855,11 +1925,12 @@ fn preview_card(
     test_label: &str,
     test_hint: &str,
 ) -> Markup {
+    let config_accent = PREVIEW_ACCENT.with(|accent| accent.take());
     html! {
         section.card.form {
             h2 { "Preview" }
             p.muted { "What the bot posts with the saved settings. Discord also renders formatting such as **bold**." }
-            (discord_message(bot, blocks))
+            (discord_message_colored(bot, blocks, config_accent))
             (extra)
             form.test-row method="post" action={ (base) "/" (module) "/test" } {
                 (csrf_field(session))
@@ -1928,14 +1999,15 @@ fn backup(session: &Session, base: &str, guild: &str) -> Markup {
             p.muted {
                 "Only the sections in the file are replaced (a file with just "
                 code { "twitch" } " only changes Twitch); the others stay as they are. "
-                "Channel and role ids must exist on this server."
+                "Channel and role ids must exist on this server. The former Misty bot's "
+                code { "data/state.json" } " works too. You will see every change before it is saved."
             }
             (field("file", "Settings file", "A file downloaded above, 512 KB at most.", html! {
                 input #file type="file" name="file" accept=".json,application/json";
             }))
             (textarea("json", "Or paste the settings", "", "", 6, 500_000))
             div.form-actions {
-                button.btn.primary type="submit" { "Import" }
+                button.btn.primary type="submit" { "Review the import" }
             }
         }
     }
@@ -2062,6 +2134,72 @@ fn side_nav(base: &str, config: &GuildConfig, module: &str) -> Markup {
     }
 }
 
+/// One setting changed by an import.
+pub struct Change {
+    pub section: String,
+    pub field: String,
+    pub before: String,
+    pub after: String,
+}
+
+/// What an import will change, with a button to confirm it.
+pub fn import_review(
+    session: &Session,
+    bot: &BotView,
+    context: &GuildContext,
+    config: &GuildConfig,
+    changes: &[Change],
+    raw: &str,
+    unknown: usize,
+) -> Markup {
+    let base = format!("/bots/{}/servers/{}", bot.def.slug, context.guild.id);
+    let mut sections: Vec<&str> = changes.iter().map(|c| c.section.as_str()).collect();
+    sections.dedup();
+    let main = html! {
+        form.card.form method="post" action={ (base) "/import" } enctype="multipart/form-data" {
+            (csrf_field(session))
+            input type="hidden" name="confirm" value="1";
+            textarea name="json" hidden { (raw) }
+            h2 { "Review the import" }
+            @if changes.is_empty() {
+                p.muted { "This file changes nothing: every setting is already the same." }
+            } @else {
+                p.muted {
+                    (changes.len()) " change(s) in " (sections.len()) " section(s). "
+                    "Nothing is saved until you confirm."
+                }
+            }
+            @if unknown > 0 {
+                div.notice.warn role="status" {
+                    (unknown) " channel or role id(s) of the file do not exist on this server: they are shown as ids below."
+                }
+            }
+            @for section in &sections {
+                div.review {
+                    h3 { (section) }
+                    @for change in changes.iter().filter(|c| c.section == *section) {
+                        div.review-row {
+                            span.review-field { (change.field) }
+                            span.review-values {
+                                span.review-before { (change.before) }
+                                span.review-arrow aria-hidden="true" { "→" }
+                                span.review-after { (change.after) }
+                            }
+                        }
+                    }
+                }
+            }
+            div.form-actions {
+                a.btn href={ (base) "/" (BACKUP) } { "Cancel" }
+                @if !changes.is_empty() {
+                    button.btn.primary type="submit" { "Confirm the import" }
+                }
+            }
+        }
+    };
+    guild_shell(session, bot, context, config, BACKUP, None, None, main)
+}
+
 pub fn guild_config(
     session: &Session,
     bot: &BotView,
@@ -2070,6 +2208,38 @@ pub fn guild_config(
     module: &str,
     flash: Option<&str>,
     error: Option<&str>,
+) -> Markup {
+    let base = format!("/bots/{}/servers/{}", bot.def.slug, context.guild.id);
+    let main = html! {
+        @if module == DANGER {
+            (danger_zone(session, &base))
+        } @else if module == BACKUP {
+            (backup(session, &base, &context.guild.name))
+        } @else {
+            form.card.form method="post" action={ (base) "/" (module) } data-track {
+                (csrf_field(session))
+                (guild_fields(module, bot, context, config))
+                div.form-actions {
+                    button.btn.primary type="submit" { "Save" }
+                }
+            }
+            (guild_preview(session, bot, context, config, module, &base))
+        }
+    };
+    guild_shell(session, bot, context, config, module, flash, error, main)
+}
+
+/// A server page: its header, the sections on the side and `main`.
+#[allow(clippy::too_many_arguments)]
+fn guild_shell(
+    session: &Session,
+    bot: &BotView,
+    context: &GuildContext,
+    config: &GuildConfig,
+    module: &str,
+    flash: Option<&str>,
+    error: Option<&str>,
+    main: Markup,
 ) -> Markup {
     let guild = &context.guild;
     let servers = format!("/bots/{}/servers", bot.def.slug);
@@ -2101,22 +2271,7 @@ pub fn guild_config(
         }
         div.guild-layout {
             (side_nav(&base, config, module))
-            div.guild-main {
-                @if module == DANGER {
-                    (danger_zone(session, &base))
-                } @else if module == BACKUP {
-                    (backup(session, &base, &guild.name))
-                } @else {
-                    form.card.form method="post" action={ (base) "/" (module) } data-track {
-                        (csrf_field(session))
-                        (guild_fields(module, bot, context, config))
-                        div.form-actions {
-                            button.btn.primary type="submit" { "Save" }
-                        }
-                    }
-                    (guild_preview(session, bot, context, config, module, &base))
-                }
-            }
+            div.guild-main { (main) }
         }
     };
     bot_page(session, bot, Tab::Servers, flash, content)
