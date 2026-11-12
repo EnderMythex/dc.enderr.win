@@ -40,8 +40,14 @@ impl IntoResponse for AppError {
                 "Discord refused the change",
                 "Discord did not accept this change. Go back and try something else.",
             ),
+            // Not 502: Cloudflare would replace the page with its own.
+            Self::Discord(DiscordError::RateLimited) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Discord asks to slow down",
+                "Too many requests were sent to Discord in a short time. This page reloads by itself in a few seconds.",
+            ),
             Self::Discord(_) => (
-                StatusCode::BAD_GATEWAY,
+                StatusCode::SERVICE_UNAVAILABLE,
                 "Discord is not responding",
                 "Communication with Discord failed. Please try again in a moment.",
             ),
@@ -54,6 +60,14 @@ impl IntoResponse for AppError {
         if status.is_server_error() {
             tracing::error!(error = %self, "request failed");
         }
-        (status, views::error_page(status.as_u16(), title, message)).into_response()
+        let retry = matches!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
+        );
+        let page = views::error_page(status.as_u16(), title, message, retry);
+        if retry {
+            return (status, [(axum::http::header::RETRY_AFTER, "5")], page).into_response();
+        }
+        (status, page).into_response()
     }
 }

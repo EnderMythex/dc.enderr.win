@@ -138,6 +138,22 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
             };
             (channel, logs::sample())
         }
+        "twitch" => {
+            let twitch = &config.twitch;
+            let Some(channel) = twitch.channel.clone() else {
+                return missing("an alert channel");
+            };
+            let login = twitch.logins.first().map_or("streamer", String::as_str);
+            let stream = serde_json::json!({
+                "user_name": login,
+                "title": "Test alert from the dashboard",
+                "game_name": "Just Chatting",
+            });
+            (
+                channel,
+                crate::twitch::alert(login, &stream, twitch.role.as_deref()),
+            )
+        }
         // Panels are permanent messages: a test posts them again.
         "reminders" => {
             let reminders = &config.reminders;

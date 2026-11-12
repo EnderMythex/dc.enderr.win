@@ -197,7 +197,12 @@ fn too_many_requests(path: &str, wait: u64) -> Response {
         let body = serde_json::json!({ "ok": false, "error": message });
         (status, retry, axum::Json(body)).into_response()
     } else {
-        (status, retry, views::error_page(429, "Slow down", message)).into_response()
+        (
+            status,
+            retry,
+            views::error_page(429, "Slow down", message, false),
+        )
+            .into_response()
     };
     response
         .headers_mut()

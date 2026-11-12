@@ -8,7 +8,10 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use axum_extra::extract::Form;
+use std::sync::Arc;
+
 use dc_core::{
+    cards::{self, Tone},
     guild::{GuildConfig, Reward, Xp},
     render,
     requests::{Answer, Request},
@@ -58,6 +61,7 @@ const TESTABLE: &[&str] = &[
     "logs",
     "roles",
     "reminders",
+    "twitch",
 ];
 
 /// Checks access and loads everything a server page needs. 404 when the bot
@@ -68,7 +72,7 @@ async fn page_data(
     slug: &str,
     guild_id: &str,
     module: &str,
-) -> Result<(BotView, GuildContext, GuildConfig), AppError> {
+) -> Result<(BotView, Arc<GuildContext>, GuildConfig), AppError> {
     let known = module == DANGER || module == BACKUP || MODULES.iter().any(|(id, _)| *id == module);
     if !dc_core::is_snowflake(guild_id) || !known {
         return Err(AppError::NotFound);
@@ -657,7 +661,34 @@ pub async fn preview(
     let name = user.display_name().to_owned();
     let avatar = || state.discord.avatar_png(&user.id, user.avatar.as_deref());
 
+    // The server, from the cache shared with the settings pages.
+    let context = || async {
+        let token = def.token().ok_or(AppError::NotFound)?;
+        state
+            .discord
+            .guild_context(&token, &guild_id)
+            .await
+            .map_err(|_| AppError::NotFound)
+    };
     let svg = match image.as_str() {
+        "close-dms.png" => {
+            let png = dc_core::tips::CLOSE_DMS_PNG;
+            return Ok(([(header::CONTENT_TYPE, "image/png")], png).into_response());
+        }
+        // Banners of the welcome DM and of the safety reminder.
+        "dm-banner-en.png" | "dm-banner-fr.png" => {
+            let server = context().await?.guild.name.clone();
+            let title = if image == "dm-banner-fr.png" {
+                format!("Bienvenue sur {server}")
+            } else {
+                format!("Welcome to {server}")
+            };
+            cards::banner(Tone::Info, &def.name, &title, "")
+        }
+        "reminder-en.png" | "reminder-fr.png" => {
+            let title = dc_core::tips::reminder_title(image == "reminder-fr.png");
+            cards::banner(Tone::Warning, &def.name, title, "")
+        }
         "captcha.png" => render::captcha(&render::captcha_code()),
         "rank.png" => {
             let picture = avatar().await;
@@ -672,12 +703,8 @@ pub async fn preview(
             })
         }
         "welcome.png" => {
-            let token = def.token().ok_or(AppError::NotFound)?;
-            let guild = state
-                .discord
-                .guild(&token, &guild_id)
-                .await
-                .map_err(|_| AppError::NotFound)?;
+            let context = context().await?;
+            let guild = &context.guild;
             let picture = avatar().await;
             let subtitle = format!(
                 "Member #{} · {}",

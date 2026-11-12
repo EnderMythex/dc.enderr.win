@@ -190,4 +190,13 @@
     void bar.offsetWidth;
     bar.classList.add('shake');
   });
+
+  // ------------------------------------------------------------ retry
+
+  // Discord asked to slow down: the error page reloads after a few seconds.
+  const retry = document.querySelector('[data-retry]');
+  if (retry) {
+    const seconds = Number(retry.dataset.retry) || 5;
+    setTimeout(() => location.reload(), seconds * 1000);
+  }
 })();

@@ -337,7 +337,8 @@ pub fn offline() -> Markup {
     )
 }
 
-pub fn error_page(status: u16, title: &str, message: &str) -> Markup {
+/// `retry`: a passing problem; the page reloads itself after a few seconds.
+pub fn error_page(status: u16, title: &str, message: &str, retry: bool) -> Markup {
     document(
         title,
         "public",
@@ -345,11 +346,14 @@ pub fn error_page(status: u16, title: &str, message: &str) -> Markup {
             div.frame {
                 div.band.spacer {}
                 (rule())
-                main.band.hero {
+                main.band.hero data-retry=[retry.then_some("5")] {
                     p.error-code { (status) }
                     h1 { (title) }
                     p.lead { (message) }
-                    a.btn href="/" { "Back to home" }
+                    div.hero-actions {
+                        @if retry { a.btn.primary href="" { "Try again" } }
+                        a.btn href="/" { "Back to home" }
+                    }
                 }
                 (rule())
                 div.band.spacer {}
@@ -1251,11 +1255,88 @@ fn guild_preview(
                 p.dtext { (fill_welcome(&welcome.message, me, &guild.name, count)) }
                 @if welcome.image { (image("welcome.png", "Welcome image", 1000, 360)) }
             };
+            let public = preview_card(
+                session,
+                bot,
+                blocks,
+                html! {},
+                base,
+                module,
+                "Send a test",
+                "Sends this message to the welcome channel, as if you had just joined.",
+            );
+            return html! {
+                (public)
+                @if welcome.dm_enabled { (dm_preview(bot, config, me, &guild.name, count, base)) }
+            };
+        }
+        "roles" => {
+            let panel = &config.role_panel;
+            let blocks = html! {
+                p.dtitle.small { (panel.title) }
+                @if panel.buttons.is_empty() {
+                    p.dtext.muted { "Add buttons and save to see them here." }
+                }
+                @for button in &panel.buttons {
+                    div.dsplit {
+                        p.dtext {
+                            strong { (button.label) }
+                            @if !button.description.is_empty() { "\n" (button.description) }
+                        }
+                        span.dbtn {
+                            @if !button.emoji.is_empty() { (button.emoji) " " }
+                            (button.label)
+                        }
+                    }
+                }
+                p.dsmall { "Click a button to take or drop the role." }
+            };
+            (
+                blocks,
+                html! {},
+                "Post the panel again",
+                "Deletes the role panel and posts it again at the bottom of its channel.",
+            )
+        }
+        "reminders" => {
+            let reminders = &config.reminders;
+            let french = reminders.channel_fr.is_some() || reminders.channel_en.is_none();
+            let blocks = html! {
+                (image(if french { "reminder-fr.png" } else { "reminder-en.png" }, "Banner", 1000, 232))
+                (tips(french, base))
+            };
+            let extra = html! {
+                @if reminders.channel_fr.is_some() && reminders.channel_en.is_some() {
+                    p.hint { "The English channel gets the same message in English." }
+                }
+            };
+            (
+                blocks,
+                extra,
+                "Send now",
+                "Posts the reminder in its channels right away.",
+            )
+        }
+        "twitch" => {
+            let twitch = &config.twitch;
+            let login = twitch.logins.first().map_or("streamer", String::as_str);
+            let role = twitch
+                .role
+                .as_deref()
+                .and_then(|id| context.roles.iter().find(|r| r.id == id));
+            let blocks = html! {
+                @if let Some(role) = role { p.dtext { span.dmention { "@" (role.name) } } }
+                p.dtitle.small { "🔴 " (login) " is live on Twitch!" }
+                p.dtext { "Title of the stream" }
+                p.dsmall { "Game of the stream" }
+                div.dthumb { "Stream picture" }
+                span.dbtn { "Watch the stream ↗" }
+            };
             (
                 blocks,
                 html! {},
                 "Send a test",
-                "Sends this message to the welcome channel, as if you had just joined.",
+                "Sends a sample alert to the alert channel.",
             )
         }
         "rules" | "verification" => {
@@ -1352,6 +1433,69 @@ fn guild_preview(
     preview_card(
         session, bot, blocks, extra, base, module, test_label, test_hint,
     )
+}
+
+/// The anti-scam tips of the welcome DM and the reminders.
+fn tips(french: bool, base: &str) -> Markup {
+    let (scam_title, scam_text) = dc_core::tips::scam(french);
+    let (dm_title, dm_text) = dc_core::tips::dms(french);
+    html! {
+        p.dtext { strong { (scam_title) } "\n" (scam_text) }
+        p.dtext { strong { (dm_title) } "\n" (dm_text) }
+        img.dimg src={ (base) "/preview/close-dms.png" } alt="Where to turn off DMs" loading="lazy";
+    }
+}
+
+/// The private message sent to new members.
+fn dm_preview(
+    bot: &BotView,
+    config: &GuildConfig,
+    me: &str,
+    server: &str,
+    count: u64,
+    base: &str,
+) -> Markup {
+    let welcome = &config.welcome;
+    let english = !welcome.dm_text_en.is_empty();
+    let version = |french: bool| {
+        let text = if french || !english {
+            &welcome.dm_text
+        } else {
+            &welcome.dm_text_en
+        };
+        let banner = if french && english {
+            "dm-banner-fr.png"
+        } else {
+            "dm-banner-en.png"
+        };
+        html! {
+            img.dimg src={ (base) "/preview/" (banner) } alt="Banner" width="1000" height="232" loading="lazy";
+            p.dtext { (fill_welcome(text, me, server, count)) }
+            @if welcome.dm_safety { (tips(french || !english, base)) }
+            @if !welcome.dm_links.is_empty() || english {
+                div.dbtns {
+                    @for link in &welcome.dm_links { span.dbtn { (link.label) " ↗" } }
+                    @if english {
+                        span.dbtn { @if french { "🇬🇧 English" } @else { "🇫🇷 Français" } }
+                    }
+                }
+            }
+        }
+    };
+    html! {
+        section.card.form {
+            h2 { "Private message preview" }
+            p.muted {
+                "Sent to each new member who accepts private messages."
+                @if english { " The language button switches between the two versions." }
+            }
+            (discord_message(bot, version(true)))
+            @if english {
+                p.hint { "English version:" }
+                (discord_message(bot, version(false)))
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

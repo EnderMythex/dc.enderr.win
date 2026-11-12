@@ -14,33 +14,15 @@ use crate::{
 
 const TICK: Duration = Duration::from_secs(600);
 /// Picture showing where to turn off direct messages from server members.
-pub const CLOSE_DMS_PNG: &[u8] = include_bytes!("../assets/images/close-dm.png");
+pub const CLOSE_DMS_PNG: &[u8] = dc_core::tips::CLOSE_DMS_PNG;
 pub const CLOSE_DMS_FILE: &str = "close-dms.png";
 
 pub fn scam_tips(lang: Lang) -> (&'static str, &'static str) {
-    lang.pick(
-        (
-            "⚠️ Attention aux scams",
-            "Le staff ne t'enverra jamais de DM en premier et ne te demandera jamais ta seed phrase ou ta clé privée. Ne clique pas sur des liens reçus en DM (faux airdrops, wallet drainers) et vérifie toujours l'URL avant de connecter ton wallet. Si quelqu'un se fait passer pour le staff en privé, c'est un scam, signale-le.",
-        ),
-        (
-            "⚠️ Beware of scams",
-            "Staff will never DM you first and will never ask for your seed phrase or private key. Don't click links sent in DMs (fake airdrops, wallet drainers) and always check the URL before connecting your wallet. If someone impersonates staff in your DMs, it's a scam, report it.",
-        ),
-    )
+    dc_core::tips::scam(lang == Lang::Fr)
 }
 
 pub fn dm_tips(lang: Lang) -> (&'static str, &'static str) {
-    lang.pick(
-        (
-            "🔒 Ferme tes DMs",
-            "Paramètres de confidentialité du serveur > désactive \"Autoriser les messages privés des membres du serveur\".",
-        ),
-        (
-            "🔒 Turn off your DMs",
-            "Server Privacy Settings > turn off \"Allow direct messages from server members\".",
-        ),
-    )
+    dc_core::tips::dms(lang == Lang::Fr)
 }
 
 /// The tips as card blocks, with the picture (to attach as `CLOSE_DMS_FILE`).
@@ -56,7 +38,7 @@ pub fn tips_blocks(lang: Lang) -> Vec<serde_json::Value> {
 }
 
 pub fn reminder(lang: Lang) -> Msg {
-    let title = lang.pick("Rappel de sécurité", "Safety reminder");
+    let title = dc_core::tips::reminder_title(lang == Lang::Fr);
     Msg::banner(Tone::Warning, title, "", tips_blocks(lang))
         .file(CLOSE_DMS_FILE, CLOSE_DMS_PNG.to_vec())
 }

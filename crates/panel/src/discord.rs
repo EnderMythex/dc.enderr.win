@@ -15,6 +15,14 @@ use crate::config::Config;
 const DEFAULT_API: &str = "https://discord.com/api/v10";
 const CDN: &str = "https://cdn.discordapp.com";
 const IDENTITY_TTL: Duration = Duration::from_secs(600);
+/// A server's channels and roles are reused for this long: browsing the
+/// sections of a server then costs no Discord request.
+const CONTEXT_FRESH: Duration = Duration::from_secs(30);
+/// When Discord rate limits or fails, an older copy is shown rather than an
+/// error page.
+const CONTEXT_STALE: Duration = Duration::from_secs(15 * 60);
+/// A 429 asking to wait at most this long is waited out and retried once.
+const MAX_RETRY_WAIT: Duration = Duration::from_millis(2500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscordError {
@@ -56,12 +64,15 @@ struct TokenResponse {
 }
 
 type IdentityCache = HashMap<String, (Instant, Option<DiscordUser>)>;
+type ContextCache = HashMap<String, (Instant, Arc<GuildContext>)>;
 
 #[derive(Clone)]
 pub struct Discord {
     http: reqwest::Client,
     /// Bot identities keyed by the token hash: a new token invalidates the entry.
     identities: Arc<Mutex<IdentityCache>>,
+    /// Server details keyed by token hash and server id.
+    contexts: Arc<Mutex<ContextCache>>,
     /// Base URL of the Discord API; `DISCORD_API_URL` points it at a mock in tests.
     api: String,
 }
@@ -75,6 +86,7 @@ impl Discord {
         Ok(Self {
             http,
             identities: Arc::default(),
+            contexts: Arc::default(),
             api: std::env::var("DISCORD_API_URL")
                 .ok()
                 .filter(|url| !url.is_empty())
@@ -290,14 +302,38 @@ impl Discord {
         path: &str,
         authorization: &str,
     ) -> Result<T, DiscordError> {
-        let response = self
-            .http
-            .get(format!("{}{path}", self.api))
-            .header(reqwest::header::AUTHORIZATION, authorization)
-            .send()
-            .await?;
-        Ok(check(response)?.json().await?)
+        let mut retried = false;
+        loop {
+            let response = self
+                .http
+                .get(format!("{}{path}", self.api))
+                .header(reqwest::header::AUTHORIZATION, authorization)
+                .send()
+                .await?;
+            if response.status() == StatusCode::TOO_MANY_REQUESTS && !retried {
+                let wait = retry_after(&response);
+                if wait <= MAX_RETRY_WAIT {
+                    retried = true;
+                    tokio::time::sleep(wait).await;
+                    continue;
+                }
+            }
+            return Ok(check(response)?.json().await?);
+        }
     }
+}
+
+/// How long Discord asks to wait after a 429 (`Retry-After`, in seconds).
+fn retry_after(response: &Response) -> Duration {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map_or(Duration::MAX, |seconds| {
+            Duration::from_secs_f64(seconds.min(3600.0) + 0.05)
+        })
 }
 
 /// The first human-readable reason in a Discord validation error, e.g.
@@ -329,7 +365,7 @@ fn check(response: Response) -> Result<Response, DiscordError> {
 
 // ---------------------------------------------------------------- server details
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct GuildDetail {
     pub id: String,
     pub name: String,
@@ -338,7 +374,7 @@ pub struct GuildDetail {
     pub approximate_member_count: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Channel {
     pub id: String,
     #[serde(default)]
@@ -360,7 +396,7 @@ impl Channel {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Role {
     pub id: String,
     pub name: String,
@@ -386,9 +422,52 @@ impl Discord {
         self.get(&path, &format!("Bot {token}")).await
     }
 
-    /// Loads a server through the bot's token. Fails with `Unauthorized` or a
-    /// 403 / 404 status when the bot is not on that server.
+    /// Loads a server through the bot's token, from the cache when recent.
+    /// Fails with `Unauthorized` or a 403 / 404 status when the bot is not on
+    /// that server.
     pub async fn guild_context(
+        &self,
+        token: &str,
+        guild_id: &str,
+    ) -> Result<Arc<GuildContext>, DiscordError> {
+        let key = format!("{}:{guild_id}", sha256_hex(token));
+        let cached = self
+            .contexts
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&key).cloned());
+        if let Some((at, context)) = &cached
+            && at.elapsed() < CONTEXT_FRESH
+        {
+            return Ok(context.clone());
+        }
+        match self.fetch_guild_context(token, guild_id).await {
+            Ok(context) => {
+                let context = Arc::new(context);
+                if let Ok(mut cache) = self.contexts.lock() {
+                    cache.retain(|_, (at, _)| at.elapsed() < CONTEXT_STALE);
+                    cache.insert(key, (Instant::now(), context.clone()));
+                }
+                Ok(context)
+            }
+            // The bot left the server or lost its token: forget it.
+            Err(error @ (DiscordError::Unauthorized | DiscordError::Status(_))) => {
+                if let Ok(mut cache) = self.contexts.lock() {
+                    cache.remove(&key);
+                }
+                Err(error)
+            }
+            Err(error) => match cached {
+                Some((at, context)) if at.elapsed() < CONTEXT_STALE => {
+                    tracing::warn!(%error, guild = guild_id, "Discord unavailable, showing the server from the cache");
+                    Ok(context)
+                }
+                _ => Err(error),
+            },
+        }
+    }
+
+    async fn fetch_guild_context(
         &self,
         token: &str,
         guild_id: &str,
@@ -419,6 +498,23 @@ impl Discord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_delays() {
+        let response = |value: Option<&str>| {
+            let mut builder = axum::http::Response::builder().status(429);
+            if let Some(value) = value {
+                builder = builder.header("retry-after", value);
+            }
+            Response::from(builder.body("").unwrap())
+        };
+        assert_eq!(
+            retry_after(&response(Some("1.5"))),
+            Duration::from_millis(1550)
+        );
+        assert_eq!(retry_after(&response(Some("nope"))), Duration::MAX);
+        assert_eq!(retry_after(&response(None)), Duration::MAX);
+    }
 
     #[test]
     fn rejection_reasons() {

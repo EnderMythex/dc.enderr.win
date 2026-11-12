@@ -601,3 +601,8 @@ body.activity { display: grid; place-items: center; padding: 24px; }
   .side-menu .side-nav { position: static; padding: 0 6px 10px; }
   .side-menu .side-nav > .side-group:first-child { margin-top: 4px; }
 }
+.hero-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.dsmall { color: var(--muted); font-size: 12.5px; }
+.dbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.dmention { padding: 0 3px; border-radius: 4px; background: rgba(88, 101, 242, 0.3); color: #c9cdfb; font-weight: 500; }
+.dthumb { display: grid; place-items: center; width: 100%; max-width: 420px; aspect-ratio: 16 / 9; border-radius: 8px; background: linear-gradient(135deg, #2b1d47, #151515); color: var(--muted); font-size: 12.5px; }
