@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::{
-    AppState,
+    AppState, audit,
     auth::{CsrfForm, Session},
     bridge,
     discord::{DiscordError, GuildContext},
@@ -45,6 +45,13 @@ pub const MODULES: &[(&str, &str)] = &[
     ("twitch", "Twitch"),
     ("reminders", "Safety reminders"),
 ];
+
+fn module_label(module: &str) -> &str {
+    MODULES
+        .iter()
+        .find(|(id, _)| *id == module)
+        .map_or(module, |(_, label)| label)
+}
 
 /// Extra page next to the sections: reset of the whole server.
 pub const DANGER: &str = "danger";
@@ -361,13 +368,27 @@ pub async fn save(
     if module == DANGER || module == BACKUP {
         return Err(AppError::NotFound);
     }
-    let (bot, _, mut config) = page_data(&state, &session, &slug, &guild_id, &module).await?;
+    let (bot, context, mut config) = page_data(&state, &session, &slug, &guild_id, &module).await?;
+    let before = serde_json::to_value(&config).unwrap_or_default();
     apply_form(&mut config, &module, form);
     config.save(&bot.def.dir, &guild_id)?;
     tracing::info!(
         user = %session.user.id, bot = %bot.def.slug, guild = %guild_id, module,
         "server settings saved"
     );
+    // What the bot will use: the saved file, once sanitized.
+    let saved = GuildConfig::load(&bot.def.dir, &guild_id).unwrap_or(config);
+    let after = serde_json::to_value(&saved).unwrap_or_default();
+    let changed = audit::changes(&before, &after, &context);
+    if !changed.is_empty() {
+        let label = module_label(&module);
+        let action = format!(
+            "{label} saved on {}: {}",
+            context.guild.name,
+            changed.join("; ")
+        );
+        audit::record(&state, &session, &bot.def.slug, action).await;
+    }
     let to = format!("/bots/{}/servers/{guild_id}/{module}?m=guild", bot.def.slug);
     Ok(Redirect::to(&to).into_response())
 }
@@ -383,7 +404,7 @@ pub async fn test(
     if !TESTABLE.contains(&module.as_str()) {
         return Err(AppError::NotFound);
     }
-    let (bot, ..) = page_data(&state, &session, &slug, &guild_id, &module).await?;
+    let (bot, context, _) = page_data(&state, &session, &slug, &guild_id, &module).await?;
     let request = Request::Test {
         guild_id: guild_id.clone(),
         module: module.clone(),
@@ -394,6 +415,13 @@ pub async fn test(
         user = %session.user.id, bot = %bot.def.slug, guild = %guild_id, module,
         ok = answer.ok, "test requested"
     );
+    let outcome = if answer.ok { "sent" } else { "failed" };
+    let action = format!(
+        "{} test {outcome} on {}",
+        module_label(&module),
+        context.guild.name
+    );
+    audit::record(&state, &session, &bot.def.slug, action).await;
     state.notices.put(session.key(), answer);
     let to = format!("/bots/{}/servers/{guild_id}/{module}", bot.def.slug);
     Ok(Redirect::to(&to).into_response())
@@ -422,6 +450,8 @@ pub async fn export(
     let body = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
     let name = format!("{}-{guild_id}-settings.json", bot.def.slug);
     tracing::info!(user = %session.user.id, bot = %bot.def.slug, guild = %guild_id, "settings exported");
+    let action = format!("Settings of {} exported", context.guild.name);
+    audit::record(&state, &session, &bot.def.slug, action).await;
     Ok((
         [
             (
@@ -541,6 +571,12 @@ pub async fn import(
                     user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
                     sections = %sections.join(","), "settings imported"
                 );
+                let action = format!(
+                    "Settings imported on {} ({})",
+                    context.guild.name,
+                    sections.join(", ")
+                );
+                audit::record(&state, &session, &bot.def.slug, action).await;
                 let unknown = unknown_ids(&config, &context);
                 let mut message = format!(
                     "Settings imported ({} section(s): {}).",
@@ -581,7 +617,7 @@ pub async fn reset(
     if form.confirm.is_none() {
         return Err(AppError::BadRequest("Tick the confirmation box to reset."));
     }
-    let (bot, ..) = page_data(&state, &session, &slug, &guild_id, DANGER).await?;
+    let (bot, context, _) = page_data(&state, &session, &slug, &guild_id, DANGER).await?;
     // Saved as defaults rather than deleted, so the bot notices the change
     // and takes its panels down.
     GuildConfig::default().save(&bot.def.dir, &guild_id)?;
@@ -589,6 +625,13 @@ pub async fn reset(
         user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
         xp = form.xp.is_some(), "server settings reset"
     );
+    let what = if form.xp.is_some() {
+        "settings and XP"
+    } else {
+        "settings"
+    };
+    let action = format!("Every {what} of {} reset", context.guild.name);
+    audit::record(&state, &session, &bot.def.slug, action).await;
     let mut answer = Answer {
         ok: true,
         message: "All settings of this server were reset.".into(),
@@ -639,6 +682,8 @@ pub async fn leave(
         user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
         "bot removed from a server"
     );
+    let action = format!("Bot removed from {}", context.guild.name);
+    audit::record(&state, &session, &bot.def.slug, action).await;
     let message = format!("{} has left {}.", bot.def.name, context.guild.name);
     state
         .notices

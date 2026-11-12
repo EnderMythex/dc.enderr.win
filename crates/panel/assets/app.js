@@ -1,6 +1,8 @@
 // Panel enhancements. Every page works without this script; it adds:
 // - a "Recovering connection" screen while the panel restarts (redeploys);
-// - a bar for unsaved changes on settings forms, with Save and Cancel.
+// - a bar for unsaved changes on settings forms, with Save and Cancel;
+// - a confirmation before saving a role pick that looks like a mistake
+//   (a staff role given to members, a member role trusted as staff).
 (() => {
   'use strict';
 
@@ -101,6 +103,62 @@
     }, 5000);
   }
 
+  // ------------------------------------------------------------ risky roles
+
+  /** Picked roles that look like a mistake, as sentences. */
+  const riskyPicks = (form) => {
+    const found = [];
+    for (const box of form.querySelectorAll('[data-warn]')) {
+      const kind = box.dataset.warn;
+      const where = box.dataset.warnLabel || 'this setting';
+      const picked = box.tagName === 'SELECT'
+        ? [...box.selectedOptions].filter((option) => option.value)
+        : [...box.querySelectorAll('input:checked')];
+      for (const item of picked) {
+        const reason = kind === 'give' ? item.dataset.giveRisk : item.dataset.staffRisk;
+        if (!reason) continue;
+        const name = item.dataset.role ? `@${item.dataset.role}` : item.textContent.trim();
+        const line = kind === 'give'
+          ? `${name} in “${where}”: members get it, and ${reason}.`
+          : `${name} in “${where}”: it gets staff rights, but ${reason}.`;
+        if (!found.includes(line)) found.push(line);
+      }
+    }
+    return found;
+  };
+
+  /** Asks before saving risky picks; resolves to true to save anyway. */
+  const confirmRisks = (lines) => new Promise((resolve) => {
+    const dialog = $('dialog', 'confirm');
+    dialog.setAttribute('aria-labelledby', 'confirm-title');
+    const title = $('h2', '', 'Is this role right?');
+    title.id = 'confirm-title';
+    const intro = $('p', 'muted', 'These choices are often a typo. Check them before saving:');
+    const list = $('ul', 'confirm-list');
+    for (const line of lines) list.append($('li', '', line));
+    const back = $('button', 'btn ghost', 'Go back');
+    const go = $('button', 'btn danger', 'Save anyway');
+    back.type = 'button';
+    go.type = 'button';
+    const actions = $('div', 'confirm-actions');
+    actions.append(back, go);
+    dialog.append(title, intro, list, actions);
+    document.body.append(dialog);
+    const close = (answer) => {
+      dialog.close();
+      dialog.remove();
+      resolve(answer);
+    };
+    back.addEventListener('click', () => close(false));
+    go.addEventListener('click', () => close(true));
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      close(false);
+    });
+    dialog.showModal();
+    back.focus();
+  });
+
   // Never post a form to a panel that is down: the changes would be lost.
   let confirmedSubmit = false;
   document.addEventListener('submit', async (event) => {
@@ -108,6 +166,8 @@
     const form = event.target;
     const submitter = event.submitter;
     event.preventDefault();
+    const risks = riskyPicks(form);
+    if (risks.length > 0 && !(await confirmRisks(risks))) return;
     if (!(await healthy())) {
       await lost();
     }

@@ -405,6 +405,117 @@ pub struct Role {
     /// Roles owned by an integration (bots, boosts) cannot be assigned.
     #[serde(default)]
     pub managed: bool,
+    /// Discord permission bits, as a decimal string.
+    #[serde(default)]
+    pub permissions: String,
+}
+
+/// Permissions that make a role a staff role, strongest first.
+const POWERS: [(u64, &str); 10] = [
+    (1 << 3, "Administrator"),
+    (1 << 5, "Manage Server"),
+    (1 << 28, "Manage Roles"),
+    (1 << 4, "Manage Channels"),
+    (1 << 2, "Ban Members"),
+    (1 << 1, "Kick Members"),
+    (1 << 40, "Timeout Members"),
+    (1 << 13, "Manage Messages"),
+    (1 << 29, "Manage Webhooks"),
+    (1 << 17, "Mention @everyone"),
+];
+
+/// Words of role names that sound like staff.
+const STAFF_WORDS: [&str; 16] = [
+    "admin",
+    "administrateur",
+    "administrator",
+    "staff",
+    "modo",
+    "mod",
+    "moderateur",
+    "moderator",
+    "owner",
+    "fondateur",
+    "founder",
+    "gerant",
+    "responsable",
+    "manager",
+    "helper",
+    "support",
+];
+
+/// Words of role names that sound like every member has the role.
+const MEMBER_WORDS: [&str; 18] = [
+    "membre",
+    "membres",
+    "member",
+    "members",
+    "verifie",
+    "verifies",
+    "verified",
+    "unverified",
+    "joueur",
+    "player",
+    "visiteur",
+    "visitor",
+    "guest",
+    "nouveau",
+    "newcomer",
+    "arrivant",
+    "communaute",
+    "community",
+];
+
+/// Lowercase words of a name, accents removed (é → e).
+fn words(name: &str) -> Vec<String> {
+    let folded: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'à' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            c => c,
+        })
+        .collect();
+    folded
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+impl Role {
+    /// The strongest staff permission of the role, if any.
+    pub fn power(&self) -> Option<&'static str> {
+        let bits: u64 = self.permissions.parse().unwrap_or(0);
+        POWERS
+            .iter()
+            .find(|(bit, _)| bits & bit != 0)
+            .map(|(_, name)| *name)
+    }
+
+    /// Why giving this role to members may be a mistake.
+    pub fn staff_risk(&self) -> Option<String> {
+        if let Some(power) = self.power() {
+            return Some(format!("it has the {power} permission"));
+        }
+        let words = words(&self.name);
+        words
+            .iter()
+            .any(|w| STAFF_WORDS.contains(&w.as_str()))
+            .then(|| "its name sounds like a staff role".to_owned())
+    }
+
+    /// Does the name sound like a role every member has?
+    pub fn sounds_common(&self) -> bool {
+        words(&self.name)
+            .iter()
+            .any(|w| MEMBER_WORDS.contains(&w.as_str()))
+    }
 }
 
 /// What the dashboard needs to configure a bot on one server.
@@ -498,6 +609,31 @@ impl Discord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn role(name: &str, permissions: &str) -> Role {
+        Role {
+            id: "1".into(),
+            name: name.into(),
+            position: 0,
+            managed: false,
+            permissions: permissions.into(),
+        }
+    }
+
+    #[test]
+    fn risky_roles() {
+        assert_eq!(role("Boss", "8").power(), Some("Administrator"));
+        assert_eq!(
+            role("Boss", "1099511627776").power(),
+            Some("Timeout Members")
+        );
+        assert!(role("Boss", "8").staff_risk().is_some());
+        assert!(role("🛡️ Modérateur", "0").staff_risk().is_some());
+        assert!(role("Mod", "0").staff_risk().is_some());
+        assert!(role("Modern art", "0").staff_risk().is_none());
+        assert!(role("Membre vérifié", "0").sounds_common());
+        assert!(!role("VIP", "0").sounds_common());
+    }
 
     #[test]
     fn retry_delays() {

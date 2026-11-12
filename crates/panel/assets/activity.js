@@ -3,7 +3,16 @@
 (() => {
   'use strict';
 
-  const { base, clientId } = document.body.dataset;
+  let { base, clientId } = document.body.dataset;
+  // The shared URL mapping (the same for every bot): the application id is
+  // in the page's own address, <application id>.discordsays.com.
+  if (!clientId) {
+    const match = location.hostname.match(/^(\d{17,20})\.discordsays\.com$/);
+    if (match) {
+      clientId = match[1];
+      base = `${base}${clientId}/`;
+    }
+  }
   const query = new URLSearchParams(location.search);
   const frameId = query.get('frame_id');
   const guildId = query.get('guild_id');
@@ -246,6 +255,10 @@
       return;
     }
     token = result.token;
+    if (result.bot) {
+      $('bot-name').textContent = result.bot;
+      document.title = `Verification · ${result.bot}`;
+    }
     $('who').textContent = result.name;
     show('challenge');
     showPuzzle(result);

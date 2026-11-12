@@ -222,7 +222,11 @@ pub async fn bot_logs(
     let def = owned_bot(&state, &session, &slug).await?;
     let bot = BotView::load(&state, def).await;
     let logs = state.docker.logs(&bot.def).await;
-    Ok(views::bot_logs(&session, &bot, logs).into_response())
+    let activity = crate::audit::recent(&state, &bot.def.slug)
+        .await
+        .map_err(|error| tracing::warn!(%error, "panel activity unavailable"))
+        .unwrap_or_default();
+    Ok(views::bot_logs(&session, &bot, logs, &activity).into_response())
 }
 
 pub async fn bot_settings(
@@ -291,8 +295,25 @@ pub async fn save_settings(
             return Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response());
         }
     };
+    let previous = BotSettings::load(&def.dir).unwrap_or_default();
     settings.save(&def.dir)?;
     tracing::info!(user = %session.user.id, bot = %def.slug, "settings saved");
+    if previous != settings {
+        let mut changed = Vec::new();
+        if previous.presence_status != settings.presence_status {
+            changed.push(format!("status → {}", settings.presence_status));
+        }
+        if previous.activity_type != settings.activity_type
+            || previous.activity_text != settings.activity_text
+        {
+            changed.push(format!(
+                "activity → {} “{}”",
+                settings.activity_type, settings.activity_text
+            ));
+        }
+        let action = format!("Presence changed: {}", changed.join(", "));
+        crate::audit::record(&state, &session, &def.slug, action).await;
+    }
 
     Ok(Redirect::to(&format!("/bots/{}/settings?m=saved", def.slug)).into_response())
 }
@@ -445,13 +466,31 @@ pub async fn save_profile(
         ));
     }
 
+    let mut done = Vec::new();
     if problem.is_none() && !changes.is_empty() {
         let fields: Vec<String> = changes.keys().cloned().collect();
+        let previous_name = current.as_ref().map(|user| user.username.clone());
         match state.discord.update_bot_profile(&token, changes).await {
-            Ok(_) => tracing::info!(
-                user = %session.user.id, bot = %def.slug, fields = %fields.join(","),
-                "bot profile updated"
-            ),
+            Ok(_) => {
+                tracing::info!(
+                    user = %session.user.id, bot = %def.slug, fields = %fields.join(","),
+                    "bot profile updated"
+                );
+                for field in &fields {
+                    done.push(match field.as_str() {
+                        "username" => format!(
+                            "name changed{} → {username}",
+                            previous_name
+                                .as_deref()
+                                .map(|name| format!(" from {name}"))
+                                .unwrap_or_default()
+                        ),
+                        "avatar" => "profile picture changed".to_owned(),
+                        _ if form.banner.is_empty() => "banner removed".to_owned(),
+                        _ => "banner changed".to_owned(),
+                    });
+                }
+            }
             Err(error) => problem = Some(profile_problem(error)?),
         }
     }
@@ -464,9 +503,17 @@ pub async fn save_profile(
             .is_some_and(|current| current != bio)
     {
         match state.discord.update_bot_bio(&token, &bio).await {
-            Ok(()) => tracing::info!(user = %session.user.id, bot = %def.slug, "bot bio updated"),
+            Ok(()) => {
+                tracing::info!(user = %session.user.id, bot = %def.slug, "bot bio updated");
+                done.push("bio changed".to_owned());
+            }
             Err(error) => problem = Some(profile_problem(error)?),
         }
+    }
+
+    if !done.is_empty() {
+        let action = format!("Profile: {}", done.join(", "));
+        crate::audit::record(&state, &session, &def.slug, action).await;
     }
 
     if let Some(problem) = problem {
@@ -532,6 +579,7 @@ pub async fn power(
         return Ok((StatusCode::BAD_GATEWAY, page).into_response());
     }
     tracing::info!(user = %session.user.id, bot = %def.slug, action = form.action, "power action");
+    crate::audit::record(&state, &session, &def.slug, format!("Bot {flash}")).await;
     Ok(Redirect::to(&format!("/bots/{}?m={flash}", def.slug)).into_response())
 }
 

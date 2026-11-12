@@ -1,4 +1,5 @@
 mod activity;
+mod audit;
 mod auth;
 mod bridge;
 mod config;
@@ -155,6 +156,10 @@ fn app(state: AppState) -> Router {
             post(routes::save_profile).layer(DefaultBodyLimit::max(7 * 1024 * 1024)),
         )
         .route("/bots/{slug}/power", post(routes::power))
+        .route("/activity", get(activity::shared_page))
+        .route("/activity/", get(activity::shared_page))
+        .route("/activity/app.css", get(routes::stylesheet))
+        .route("/activity/app.js", get(activity::script))
         .route("/activity/{slug}", get(activity::page))
         .route("/activity/{slug}/", get(activity::page))
         .route("/activity/{slug}/app.css", get(routes::stylesheet))
@@ -193,7 +198,7 @@ fn too_many_requests(path: &str, wait: u64) -> Response {
     let retry = [(header::RETRY_AFTER, wait.to_string())];
     let message = "Too many requests. Wait a moment, then try again.";
     // The verification page reads JSON answers.
-    let mut response = if path.starts_with("/activity/") {
+    let mut response = if path.starts_with("/activity") {
         let body = serde_json::json!({ "ok": false, "error": message });
         (status, retry, axum::Json(body)).into_response()
     } else {
@@ -227,7 +232,7 @@ async fn harden_and_log(State(state): State<AppState>, request: Request, next: N
 
     let mut response = next.run(request).await;
 
-    let in_activity = path.starts_with("/activity/");
+    let in_activity = path == "/activity" || path.starts_with("/activity/");
     let headers = response.headers_mut();
     // Tells the browser script and service worker that this answer comes
     // from the panel itself, not from a proxy error page.

@@ -46,7 +46,8 @@ impl Tier {
     }
 
     pub fn of(method: &Method, path: &str) -> Option<Self> {
-        let verification = path.starts_with("/activity/") || path.starts_with("/verify/");
+        let verification =
+            path == "/activity" || path.starts_with("/activity/") || path.starts_with("/verify/");
         let static_file = path.starts_with("/assets/")
             || path == "/sw.js"
             || path == "/favicon.ico"

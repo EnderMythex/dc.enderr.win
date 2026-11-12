@@ -264,6 +264,24 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .ll:hover { background: #0e0e0e; }
 .lt { flex: none; color: #555; user-select: none; }
 .logs-empty { padding: 28px 20px; }
+.card.flush + .card.flush, .hint + .card.flush { margin-top: 18px; }
+
+/* Panel activity, under the console. */
+.audit { list-style: none; margin: 0; padding: 6px 0; max-height: 480px; overflow: auto; font-size: 13.5px; }
+.audit li {
+  display: grid;
+  grid-template-columns: 150px 140px 1fr;
+  gap: 14px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+}
+.audit li:first-child { border-top: 0; }
+.audit-time { color: var(--muted); font: 12.5px/1.6 var(--mono); }
+.audit-who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-what { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .audit li { grid-template-columns: 1fr; gap: 2px; }
+}
 
 /* ------------------------------------------------------------ forms */
 
@@ -606,3 +624,17 @@ body.activity { display: grid; place-items: center; padding: 24px; }
 .dbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 .dmention { padding: 0 3px; border-radius: 4px; background: rgba(88, 101, 242, 0.3); color: #c9cdfb; font-weight: 500; }
 .dthumb { display: grid; place-items: center; width: 100%; max-width: 420px; aspect-ratio: 16 / 9; border-radius: 8px; background: linear-gradient(135deg, #2b1d47, #151515); color: var(--muted); font-size: 12.5px; }
+
+/* Confirmation before saving a role pick that looks like a mistake. */
+.confirm {
+  width: min(480px, calc(100vw - 32px));
+  padding: 22px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid rgba(245, 165, 36, 0.5);
+  border-radius: var(--radius);
+}
+.confirm::backdrop { background: rgba(0, 0, 0, 0.7); }
+.confirm h2 { margin: 0 0 6px; font-size: 17px; color: var(--warn); }
+.confirm-list { margin: 12px 0 18px; padding-left: 18px; display: grid; gap: 8px; font-size: 14px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }

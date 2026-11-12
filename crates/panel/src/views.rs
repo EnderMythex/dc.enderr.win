@@ -645,6 +645,7 @@ pub fn bot_logs(
     session: &Session,
     bot: &BotView,
     logs: Result<Vec<LogLine>, ActionError>,
+    activity: &[crate::audit::Entry],
 ) -> Markup {
     let content = html! {
         @match logs {
@@ -673,6 +674,28 @@ pub fn bot_logs(
                 }
                 p.hint { "Last 300 lines of the container output." }
             }
+        }
+        section.card.flush {
+            div.card-head {
+                h2 { "Panel activity" }
+            }
+            @if activity.is_empty() {
+                p.muted.logs-empty { "Nothing done on the panel yet." }
+            } @else {
+                ul.audit {
+                    @for entry in activity {
+                        li {
+                            span.audit-time { (crate::audit::format_time(entry.at)) }
+                            span.audit-who title=(entry.user_id) { (entry.user_name) }
+                            span.audit-what { (entry.action) }
+                        }
+                    }
+                }
+            }
+        }
+        p.hint {
+            "Changes made on this panel: profile, presence, power, server settings, tests and backups. Latest "
+            (crate::audit::SHOWN) " entries."
         }
     };
     bot_page(session, bot, Tab::Logs, None, content)
@@ -833,11 +856,80 @@ fn channel_select<'a>(
     )
 }
 
+/// The options of a role menu. Each carries why giving it to members may be
+/// a mistake (`data-give-risk`), read by the warning before saving.
 fn role_options(roles: &[Role], current: Option<&str>) -> Markup {
     html! {
         option value="" { "— None —" }
         @for role in roles {
-            option value=(role.id) selected[current == Some(role.id.as_str())] { "@" (role.name) }
+            option value=(role.id) selected[current == Some(role.id.as_str())]
+                data-give-risk=[role.staff_risk()] { "@" (role.name) }
+        }
+    }
+}
+
+/// A role with what could make picking it a mistake: given to members
+/// (`give`), or trusted as staff (`staff`).
+struct RoleRisk<'a> {
+    role: &'a Role,
+    give: Option<String>,
+    staff: Option<String>,
+}
+
+fn role_risks<'a>(roles: &'a [Role], config: &GuildConfig) -> Vec<RoleRisk<'a>> {
+    roles
+        .iter()
+        .map(|role| {
+            let staff = if config.welcome.auto_roles.contains(&role.id) {
+                Some("it is given to every new member (Welcome)".to_owned())
+            } else if config.rules.verified_role.as_deref() == Some(role.id.as_str()) {
+                Some("it is given to every verified member (Verification)".to_owned())
+            } else if role.sounds_common() {
+                Some("its name sounds like a role every member has".to_owned())
+            } else {
+                None
+            };
+            RoleRisk {
+                role,
+                give: role.staff_risk(),
+                staff,
+            }
+        })
+        .collect()
+}
+
+/// Checkboxes of roles. `warn` is `give` when the roles are handed to
+/// members, `staff` when they get staff rights: risky picks ask for a
+/// confirmation before saving.
+fn role_checks(
+    name: &str,
+    legend: &str,
+    hint: &str,
+    roles: &[RoleRisk],
+    selected: &[String],
+    warn: &str,
+) -> Markup {
+    html! {
+        fieldset.checks data-warn=(warn) data-warn-label=(legend) {
+            legend { (legend) }
+            @if !hint.is_empty() { p.hint { (hint) } }
+            @if roles.is_empty() {
+                p.muted { "Nothing to choose from on this server." }
+            } @else {
+                div.checks-list {
+                    @for risk in roles {
+                        @let id = risk.role.id.as_str();
+                        label.check {
+                            input type="checkbox" name=(name) value=(id)
+                                checked[selected.iter().any(|s| s == id)]
+                                data-role=(risk.role.name)
+                                data-give-risk=[risk.give.as_deref()]
+                                data-staff-risk=[risk.staff.as_deref()];
+                            span { "@" (risk.role.name) }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -932,10 +1024,7 @@ fn guild_fields(
     let text_channels = || context.channels.iter().filter(|c| c.is_text());
     let categories = || context.channels.iter().filter(|c| c.is_category());
     let roles = &context.roles;
-    let role_items: Vec<(&str, String)> = roles
-        .iter()
-        .map(|role| (role.id.as_str(), format!("@{}", role.name)))
-        .collect();
+    let risks = role_risks(roles, config);
     let channel_items: Vec<(&str, String)> = text_channels()
         .map(|c| (c.id.as_str(), format!("# {}", c.name)))
         .collect();
@@ -950,7 +1039,7 @@ fn guild_fields(
                     "Discord's Administrator permission and the owners of this bot are always admins."
                 }
                 (textarea("users", "Admin members", "One Discord user id per line. In Discord: enable Developer Mode, then right-click a member and choose Copy User ID. The /ownerbot command edits this list too.", &admins.users.join("\n"), 5, 1200))
-                (checks("roles", "Admin roles", "Every member with one of these roles is an admin.", &role_items, &admins.roles))
+                (role_checks("roles", "Admin roles", "Every member with one of these roles is an admin.", &risks, &admins.roles, "staff"))
             }
         }
         "welcome" => {
@@ -961,7 +1050,7 @@ fn guild_fields(
                 (channel_select("channel", "Welcome channel", "", text_channels(), &welcome.channel))
                 (textarea("text", "Message", "Placeholders: {user} mentions the member, {name} their name, {server} the server name, {count} the member number.", &welcome.message, 4, 1800))
                 (switch("image", "Attach the welcome image", "A card with the member's avatar, name and member number.", welcome.image))
-                (checks("roles", "Roles given on arrival", "The bot's role must be above these roles.", &role_items, &welcome.auto_roles))
+                (role_checks("roles", "Roles given on arrival", "The bot's role must be above these roles.", &risks, &welcome.auto_roles, "give"))
                 (checks("channels", "Mention new members in these channels", "Optional, up to 10. The bot mentions each new member in every channel ticked here, then deletes the mention after a few seconds: the channels light up for them without leaving messages behind. Works even if the welcome message is off.", &channel_items, &welcome.ping_channels))
                 (number_input("ping_seconds", "Delete the mentions after (seconds)", "", welcome.ping_seconds, 1, 60))
                 h2.section-title { "Private message" }
@@ -1023,7 +1112,7 @@ fn guild_fields(
                 (choice("verification", "How members verify", "Website gives each member a personal link to a captcha page. The Activity opens it inside Discord but needs a one-time setup by the administrator; until then members get the image captcha.", &modes, &rules.verification))
                 (choice("captcha_style", "Captcha on the website and in the Activity", "", &styles, &rules.captcha_style))
                 (field("role", "Verified role", "Given once verified. Use it to unlock the rest of the server.", html! {
-                    select #role name="role" { (role_options(roles, rules.verified_role.as_deref())) }
+                    select #role name="role" data-warn="give" data-warn-label="Verified role" { (role_options(roles, rules.verified_role.as_deref())) }
                 }))
                 (field("remove_role", "Role removed once verified", "Optional. For example an \"Unverified\" role given on arrival in the Welcome section.", html! {
                     select #remove_role name="remove_role" { (role_options(roles, rules.remove_role.as_deref())) }
@@ -1038,7 +1127,7 @@ fn guild_fields(
                 (channel_select("channel", "Panel channel", "", text_channels(), &tickets.panel_channel))
                 (channel_select("category", "Ticket category", "New ticket channels are created in this category.", categories(), &tickets.category))
                 (channel_select("log_channel", "Transcript channel", "A transcript is sent here when a ticket is closed.", text_channels(), &tickets.log_channel))
-                (checks("roles", "Staff roles", "These roles can see, claim and close tickets.", &role_items, &tickets.staff_roles))
+                (role_checks("roles", "Staff roles", "These roles can see, claim and close tickets.", &risks, &tickets.staff_roles, "staff"))
                 (field("title", "Panel title", "", html! {
                     input #title type="text" name="title" value=(tickets.title) maxlength="80" required;
                 }))
@@ -1073,7 +1162,7 @@ fn guild_fields(
                         div.reward-row {
                             input type="number" name="reward_level" min="1" max="500" placeholder="Level"
                                 aria-label="Level" value=[reward.map(|r| r.level)];
-                            select name="reward_role" aria-label="Role" {
+                            select name="reward_role" aria-label="Role" data-warn="give" data-warn-label="Role rewards" {
                                 (role_options(roles, reward.map(|r| r.role.as_str())))
                             }
                         }
@@ -1126,7 +1215,7 @@ fn guild_fields(
                     @for index in 0..rows {
                         @let button = panel.buttons.get(index);
                         div.role-row {
-                            select name="button_role" aria-label="Role" {
+                            select name="button_role" aria-label="Role" data-warn="give" data-warn-label="Role panel buttons" {
                                 (role_options(roles, button.map(|b| b.role.as_str())))
                             }
                             input type="text" name="button_label" placeholder="Label" maxlength="80" aria-label="Label"
@@ -1196,7 +1285,7 @@ fn guild_fields(
                 (checks("channels", "Channels where links are allowed", "Used when \"Every channel\" is chosen.", &channel_items, &links.exempt_channels))
                 (textarea("domains", "Allowed websites", "One domain per line, for example tenor.com. Their subdomains are allowed too.", &links.allowed_domains.join("\n"), 4, 2000))
                 (checks("x_channels", "Channels where x.com is blocked anyway", "x.com and twitter.com links are removed there even if allowed above.", &channel_items, &links.x_blocked_channels))
-                (checks("roles", "Roles allowed to post links", "", &role_items, &links.exempt_roles))
+                (role_checks("roles", "Roles allowed to post links", "", &risks, &links.exempt_roles, "staff"))
                 (number_input("timeout", "Timeout of the author (seconds)", "0: none.", links.timeout_secs, 0, 3600))
                 (channel_select("review_channel", "Link review channel", "Optional. The member can send the removed link to the staff, who accepts it (the bot posts it) or refuses it here.", text_channels(), &links.review_channel))
             }
@@ -1775,13 +1864,13 @@ pub fn verification(client_id: Option<&str>, bot_name: &str, base: &str) -> Mark
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="dark";
                 meta name="robots" content="noindex";
-                title { "Verification · " (bot_name) }
+                title { "Verification" @if !bot_name.is_empty() { " · " (bot_name) } }
                 link rel="stylesheet" href={ (base) "app.css?v=" (VERIFY_VERSION.as_str()) };
             }
             body.public.activity data-base=(base) data-client-id=[client_id] {
                 main.activity-card {
                     div.login-mark { (icon(ICON_LOGO)) }
-                    p.eyebrow { (bot_name) }
+                    p.eyebrow #bot-name { (bot_name) }
                     h1 { "Verification" }
                     section #loading {
                         p.lead #loading-text { "Checking your Discord account…" }

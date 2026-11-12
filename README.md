@@ -31,8 +31,14 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
   only see their bots; other bots return 404. Ids in `ADMIN_IDS` (panel `.env`)
   see and manage every bot. `bot.toml` changes need no panel restart.
 - **From the panel**, owners start / stop / restart the container, read its
-  logs, set the bot's name, bio, picture, banner and presence, and configure each server
+  logs (and, under them, the panel activity: who changed the profile, the
+  presence, a server section and what changed, tests, backups…), set the bot's name, bio, picture, banner and presence, and configure each server
   the bot is in. The bot notices saved changes within a few seconds — no restart.
+- Before saving, the panel asks for a confirmation when a role pick looks
+  like a typo: a staff role (moderation permissions, or a name like
+  "Admin" / "Modo") given to members on arrival, as verified role, level
+  reward or role-panel button; or a member role (the arrival or verified
+  role, a name like "Membre") chosen as admin, ticket staff or link-exempt role.
 - Each server section shows a **preview** of what the bot posts (with the real
   images) and a **test button** that makes the running bot send it. The
   **Danger zone** resets a server to its defaults (optionally erasing its XP)
@@ -109,7 +115,10 @@ per bot; until it is done, members get the image captcha instead.
 
 1. Developer Portal → the bot's application → **Activities**: enable
    Activities, then under **URL Mappings** map the root `/` to
-   `dc.enderr.win/activity/<slug>` (the panel must be reachable over HTTPS).
+   `dc.enderr.win/activity` (the panel must be reachable over HTTPS). The
+   mapping is the same for every bot: the page recognizes the bot from the
+   application id in its address. The former per-bot mapping
+   (`dc.enderr.win/activity/<slug>`) still works.
 2. **OAuth2**: add any redirect URI (for example `https://dc.enderr.win`) — it is
    never opened, but Discord requires one — and copy the **Client Secret** into
    `bots/<slug>/.env` as `DISCORD_CLIENT_SECRET=...`.

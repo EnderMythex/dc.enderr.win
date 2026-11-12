@@ -1,9 +1,12 @@
 //! Member verification on a page of the panel, reached two ways:
 //!
 //! - **Activity** (`activity` mode): the bot's Verify button opens the bot
-//!   application's Activity, whose URL mapping points at `/activity/<slug>`.
-//!   The page proves who the member is with Discord's OAuth2, through the
-//!   Activity's own RPC channel.
+//!   application's Activity. Every bot uses the same URL mapping, `/` to
+//!   `/activity`: the page finds the application id in its own address
+//!   (`<application id>.discordsays.com`) and then talks to
+//!   `/activity/<application id>/...`. The older per-bot mapping, to
+//!   `/activity/<slug>`, keeps working. The page proves who the member is
+//!   with Discord's OAuth2, through the Activity's own RPC channel.
 //! - **Link** (`web` mode): the Verify button gives the member a link to
 //!   `/verify/<slug>?v=...`, signed by the bot for that member and server
 //!   (see `dc_core::verify_link`).
@@ -149,11 +152,33 @@ impl Challenges {
     }
 }
 
-/// The bot and its token, if it exists.
-fn bot(state: &AppState, slug: &str) -> Option<(BotDef, String)> {
-    let def = registry::find(&state.cfg.bots_dir, slug).ok().flatten()?;
-    let token = def.token()?;
-    Some((def, token))
+/// The bot and its token, by slug or by application id (the shared
+/// Activity mapping only knows the latter).
+async fn bot(state: &AppState, key: &str) -> Option<(BotDef, String)> {
+    if let Some(def) = registry::find(&state.cfg.bots_dir, key).ok().flatten() {
+        let token = def.token()?;
+        return Some((def, token));
+    }
+    if !dc_core::is_snowflake(key) {
+        return None;
+    }
+    let (bots, _) = registry::load(&state.cfg.bots_dir);
+    for def in bots {
+        let Some(token) = def.token() else { continue };
+        if def.client_secret().is_none() {
+            continue;
+        }
+        let identity = state.discord.bot_identity(Some(&token)).await;
+        if identity.is_some_and(|identity| identity.id == key) {
+            return Some((def, token));
+        }
+    }
+    None
+}
+
+/// The slug behind a slug or an application id.
+async fn slug_of(state: &AppState, key: &str) -> Option<String> {
+    bot(state, key).await.map(|(def, _)| def.slug)
 }
 
 /// Is this server verifying members with that mode (`activity` or `web`)?
@@ -185,13 +210,26 @@ pub struct PageQuery {
     frame_id: Option<String>,
 }
 
-/// GET /activity/{slug} — the page shown inside Discord.
+/// GET /activity — the page shown inside Discord, for every bot. The
+/// script finds the bot from the application id in the page's address.
+pub async fn shared_page(Query(query): Query<PageQuery>) -> Response {
+    // Inside Discord every request goes through its proxy, under `/.proxy/`,
+    // mapped to `/activity/` here.
+    let base = if query.frame_id.is_some() {
+        "/.proxy/"
+    } else {
+        "/activity/"
+    };
+    views::verification(None, "", base).into_response()
+}
+
+/// GET /activity/{slug} — the page shown inside Discord (per-bot mapping).
 pub async fn page(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(query): Query<PageQuery>,
 ) -> Result<Response, AppError> {
-    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, token) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
     if def.client_secret().is_none() {
         return Err(AppError::NotFound);
     }
@@ -216,7 +254,7 @@ pub async fn link_page(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Response, AppError> {
-    let (def, _) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, _) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
     let base = format!("/activity/{}/", def.slug);
     Ok(views::verification(None, &def.name, &base).into_response())
 }
@@ -245,7 +283,7 @@ pub async fn session(
     Path(slug): Path<String>,
     Json(body): Json<SessionBody>,
 ) -> Result<Json<Value>, AppError> {
-    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, token) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
     let secret = def.client_secret().ok_or(AppError::NotFound)?;
     let code_ok = (10..=100).contains(&body.code.len())
         && body.code.bytes().all(|b| b.is_ascii_alphanumeric());
@@ -282,7 +320,9 @@ pub async fn session(
             .challenges
             .create(&def.slug, &body.guild_id, &user.id, style);
     let name = user.global_name.unwrap_or(user.username);
-    Ok(started(challenge, description, &name))
+    let mut answer = started(challenge, description, &name);
+    answer.0["bot"] = json!(def.name);
+    Ok(answer)
 }
 
 #[derive(Deserialize)]
@@ -297,7 +337,7 @@ pub async fn link_session(
     Path(slug): Path<String>,
     Json(body): Json<LinkBody>,
 ) -> Result<Json<Value>, AppError> {
-    let (def, token) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, token) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
     let Some(claims) = verify_link::check(&token, &def.slug, &body.link, dc_core::now()) else {
         return Ok(restart(
             "This link has expired or is not valid. Click Verify on the server again.",
@@ -346,6 +386,7 @@ pub async fn captcha(
     Path(slug): Path<String>,
     Query(query): Query<TokenQuery>,
 ) -> Result<Response, AppError> {
+    let slug = slug_of(&state, &slug).await.ok_or(AppError::NotFound)?;
     let code = state
         .challenges
         .with(&slug, &query.t, |challenge| match &challenge.puzzle {
@@ -363,6 +404,7 @@ pub async fn slide_image(
     Path((slug, image)): Path<(String, String)>,
     Query(query): Query<TokenQuery>,
 ) -> Result<Response, AppError> {
+    let slug = slug_of(&state, &slug).await.ok_or(AppError::NotFound)?;
     let svg = state
         .challenges
         .with(&slug, &query.t, |challenge| match &challenge.puzzle {
@@ -393,6 +435,7 @@ pub async fn refresh(
     Path(slug): Path<String>,
     Json(body): Json<TokenBody>,
 ) -> Json<Value> {
+    let slug = slug_of(&state, &slug).await.unwrap_or_default();
     let renewed = state.challenges.with(&slug, &body.token, |challenge| {
         challenge.attempts += 1;
         challenge.puzzle = Puzzle::new(&challenge.style);
@@ -413,7 +456,8 @@ pub async fn answer(
     Path(slug): Path<String>,
     Json(body): Json<TokenBody>,
 ) -> Result<Json<Value>, AppError> {
-    let (def, _) = bot(&state, &slug).ok_or(AppError::NotFound)?;
+    let (def, _) = bot(&state, &slug).await.ok_or(AppError::NotFound)?;
+    let slug = def.slug.clone();
 
     enum Outcome {
         Passed { guild_id: String, user_id: String },
