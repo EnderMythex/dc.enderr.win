@@ -18,6 +18,9 @@ pub const ACTIVITY_TYPES: &[&str] = &[
     "custom",
     // "Watching SOL: $123.45", refreshed every 10 minutes by the bot.
     "sol_price",
+    // "Watching 1,234 players · 0.3.7" (or downloads), like the Misty bot:
+    // from the status panel settings, refreshed every 5 minutes.
+    "project_stats",
 ];
 
 pub const ACTIVITY_TEXT_MAX_CHARS: usize = 128;

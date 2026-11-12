@@ -486,6 +486,10 @@ pub struct Tickets {
     /// Optional topics offered in a menu when opening a ticket.
     pub topics: Vec<String>,
     pub max_open: u32,
+    /// A form before the ticket opens, with questions chosen from the
+    /// topic: a bug (steps, what happened, expected, every time, crash
+    /// code), an idea (the idea, why, how) or a single question.
+    pub questions: bool,
 }
 
 impl Default for Tickets {
@@ -501,6 +505,7 @@ impl Default for Tickets {
                 .into(),
             topics: Vec::new(),
             max_open: 1,
+            questions: false,
         }
     }
 }

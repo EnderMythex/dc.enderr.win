@@ -215,6 +215,63 @@ pub async fn refresh(app: &App, guild_id: &str, record: bool) {
     panels::sync_one(app, guild_id, "minecraft", server).await;
 }
 
+/// "1,234 players · 0.3.7" (downloads when there is no player count),
+/// from the first server whose status panel has a player count address or
+/// a repository.
+pub async fn stats_label(app: &App) -> Option<String> {
+    let guilds: Vec<String> = app.guilds.lock().unwrap().keys().cloned().collect();
+    for guild in guilds {
+        let config = app.config(&guild);
+        let status = &config.status;
+        let repo = status.repo_or(&config.releases);
+        if repo.is_empty() && status.players_url.is_empty() {
+            continue;
+        }
+        let mut parts = Vec::new();
+        let releases = if repo.is_empty() {
+            Vec::new()
+        } else {
+            app.github.releases(repo).await.unwrap_or_default()
+        };
+        if let Some(count) = players(app, &status.players_url).await {
+            parts.push(format!("{} players", ui::number(count)));
+        } else if !releases.is_empty() {
+            let total: u64 = releases.iter().map(github::Release::downloads).sum();
+            parts.push(format!("{} downloads", ui::number(total)));
+        }
+        if let Some(latest) = github::latest(&releases) {
+            parts.push(latest.tag_name.clone());
+        }
+        if !parts.is_empty() {
+            return Some(parts.join(" · "));
+        }
+    }
+    None
+}
+
+/// Keeps the `project_stats` activity up to date.
+pub async fn watch_presence(app: Arc<App>) {
+    let mut refreshed: Option<Instant> = None;
+    loop {
+        let wanted = dc_core::settings::BotSettings::load(&app.dir)
+            .is_ok_and(|s| s.activity_type == "project_stats");
+        // Chosen on the dashboard: shown within a minute, then every 5.
+        let due = refreshed.is_none_or(|at| at.elapsed() >= EVERY);
+        if wanted && due && !app.guilds.lock().unwrap().is_empty() {
+            let label = stats_label(&app).await;
+            refreshed = Some(Instant::now());
+            let changed = *app.stats_label.lock().unwrap() != label;
+            *app.stats_label.lock().unwrap() = label;
+            if changed {
+                panels::apply_presence(&app);
+            }
+        } else if !wanted {
+            refreshed = None;
+        }
+        tokio::time::sleep(Duration::from_secs(60)).await;
+    }
+}
+
 pub async fn watch(app: Arc<App>) {
     loop {
         tokio::time::sleep(EVERY).await;

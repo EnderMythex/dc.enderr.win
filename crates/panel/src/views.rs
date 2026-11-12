@@ -152,6 +152,7 @@ fn activity_label(value: &str) -> &'static str {
         "competing" => "Competing in…",
         "custom" => "Custom status",
         "sol_price" => "SOL price (Watching SOL: $…)",
+        "project_stats" => "Players or downloads · version (Status panel)",
         _ => "—",
     }
 }
@@ -799,6 +800,11 @@ pub fn bot_settings(
                         maxlength="128" autocomplete="off" placeholder="e.g. your commands";
                 }
             }
+            p.hint {
+                "Players or downloads · version: like the Misty bot, \"Watching 1,234 players · 0.3.7\". "
+                "The numbers come from the Status panel section of a server: its player count address "
+                "(downloads when there is none) and its repository. Refreshed every 5 minutes; the text above is not used."
+            }
             div.form-actions {
                 button.btn.primary type="submit" { "Save" }
             }
@@ -1236,6 +1242,7 @@ fn guild_fields(
                 (textarea("text", "Panel text", "", &tickets.text, 4, 1800))
                 (textarea("topics", "Topics", "Optional, one per line (10 max). Members then pick a topic from a menu.", &tickets.topics.join("\n"), 4, 900))
                 (number_input("max_open", "Open tickets per member", "", tickets.max_open, 1, 5))
+                (switch("questions", "Ask questions before opening", "A form opens first; the answers are posted in the ticket. Topics with \"bug\" in their name ask for the steps, what happened, what was expected, whether it happens every time and a crash code; topics about an idea or a feature ask for the idea, why and how; the others ask for the request. In French when the topic is in French.", tickets.questions))
             }
         }
         "levels" => {

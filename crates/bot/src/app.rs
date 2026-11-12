@@ -43,6 +43,8 @@ pub struct App {
     pub pending_links: Mutex<HashMap<String, crate::linkguard::Pending>>,
     /// Last SOL price, for the activity.
     pub sol_price: Mutex<Option<f64>>,
+    /// "1,234 players · 0.3.7", for the `project_stats` activity.
+    pub stats_label: Mutex<Option<String>>,
     /// GitHub client (`GITHUB_TOKEN` optional).
     pub github: Arc<crate::github::GitHub>,
     /// What the GitHub feeds and the status panel already saw.
@@ -178,6 +180,7 @@ impl App {
             assistant_queue: tokio::sync::Mutex::new(()),
             pending_links: Mutex::default(),
             sol_price: Mutex::default(),
+            stats_label: Mutex::default(),
             github,
             watch,
             pinger: Default::default(),

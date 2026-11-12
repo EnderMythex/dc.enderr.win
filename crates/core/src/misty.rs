@@ -232,6 +232,8 @@ pub fn sections(state: &Value, guild_id: &str) -> Result<(Map<String, Value>, St
             ),
             "topics": topics,
             "max_open": 1,
+            // Misty asked for the request in a form before opening.
+            "questions": flag(tickets, "ask_reason", true),
         }),
     );
 
@@ -341,6 +343,7 @@ mod tests {
         assert!(config.rules.text.contains("Respecte"));
         assert_eq!(config.welcome.auto_roles, vec!["1474887049726267009"]);
         assert_eq!(config.tickets.topics, vec!["Bug"]);
+        assert!(config.tickets.questions);
         assert_eq!(config.tickets.staff_roles, vec!["1474887049726267012"]);
         assert!(config.logs.enabled && config.logs.members && !config.logs.message_delete);
         assert_eq!(config.minecraft.name, "Misty SMP");

@@ -154,6 +154,7 @@ pub struct GuildForm {
     name: String,
     description: String,
     show_players: Option<String>,
+    questions: Option<String>,
     enabled: Option<String>,
     users: String,
     roles: Vec<String>,
@@ -284,6 +285,7 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.tickets.text = form.text;
             config.tickets.topics = lines(&form.topics);
             config.tickets.max_open = number(&form.max_open, 1);
+            config.tickets.questions = form.questions.is_some();
         }
         "levels" => {
             let defaults = Xp::default();

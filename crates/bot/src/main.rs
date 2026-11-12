@@ -119,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(ghfeed::watch_releases(app.clone()));
     tokio::spawn(ghfeed::watch_activity(app.clone()));
     tokio::spawn(uptime::watch(app.clone()));
+    tokio::spawn(uptime::watch_presence(app.clone()));
 
     // Privileged intents must be enabled on the Developer Portal. Without
     // them Discord closes the connection: fall back to what is allowed.

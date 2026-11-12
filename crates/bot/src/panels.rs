@@ -136,11 +136,21 @@ pub async fn repost(app: &App, guild_id: &str, kind: &str) {
 }
 
 /// Gateway payload (opcode 3) for the presence chosen on the dashboard.
-/// `sol_price`: the last SOL price, shown as "Watching SOL: $x".
-pub fn presence_payload(settings: &BotSettings, sol_price: Option<f64>) -> String {
-    if settings.activity_type == "sol_price" {
-        let activities = match sol_price {
-            Some(price) => vec![json!({ "type": 3, "name": crate::sol::label(price) })],
+/// `sol_price`: the last SOL price, shown as "Watching SOL: $x";
+/// `stats`: "1,234 players · 0.3.7" for `project_stats`.
+pub fn presence_payload(
+    settings: &BotSettings,
+    sol_price: Option<f64>,
+    stats: Option<&str>,
+) -> String {
+    let live = match settings.activity_type.as_str() {
+        "sol_price" => Some(sol_price.map(crate::sol::label)),
+        "project_stats" => Some(stats.map(str::to_owned)),
+        _ => None,
+    };
+    if let Some(label) = live {
+        let activities = match label {
+            Some(name) => vec![json!({ "type": 3, "name": name })],
             None => Vec::new(),
         };
         return json!({
@@ -179,7 +189,11 @@ pub fn apply_presence(app: &App) {
         Err(error) => return tracing::warn!(%error, "unreadable settings.json"),
     };
     if let Some(sender) = app.gateway.lock().unwrap().as_ref()
-        && let Err(error) = sender.send(presence_payload(&settings, *app.sol_price.lock().unwrap()))
+        && let Err(error) = sender.send(presence_payload(
+            &settings,
+            *app.sol_price.lock().unwrap(),
+            app.stats_label.lock().unwrap().as_deref(),
+        ))
     {
         tracing::warn!(%error, "updating the presence failed");
     }
@@ -263,7 +277,7 @@ mod tests {
     fn presence() {
         let mut settings = BotSettings::default();
         let idle: serde_json::Value =
-            serde_json::from_str(&presence_payload(&settings, None)).unwrap();
+            serde_json::from_str(&presence_payload(&settings, None, None)).unwrap();
         assert_eq!(idle["op"], 3);
         assert_eq!(idle["d"]["status"], "online");
         assert_eq!(idle["d"]["activities"], json!([]));
@@ -272,15 +286,27 @@ mod tests {
         settings.activity_type = "watching".into();
         settings.activity_text = "the server".into();
         let busy: serde_json::Value =
-            serde_json::from_str(&presence_payload(&settings, None)).unwrap();
+            serde_json::from_str(&presence_payload(&settings, None, None)).unwrap();
         assert_eq!(busy["d"]["status"], "dnd");
         assert_eq!(busy["d"]["activities"][0]["type"], 3);
         assert_eq!(busy["d"]["activities"][0]["name"], "the server");
 
         settings.activity_type = "sol_price".into();
         let sol: serde_json::Value =
-            serde_json::from_str(&presence_payload(&settings, Some(150.5))).unwrap();
+            serde_json::from_str(&presence_payload(&settings, Some(150.5), None)).unwrap();
         assert_eq!(sol["d"]["activities"][0]["name"], "SOL: $150.50");
         assert_eq!(sol["d"]["activities"][0]["type"], 3);
+
+        settings.activity_type = "project_stats".into();
+        let stats: serde_json::Value = serde_json::from_str(&presence_payload(
+            &settings,
+            None,
+            Some("42 players · 0.3.7"),
+        ))
+        .unwrap();
+        assert_eq!(stats["d"]["activities"][0]["name"], "42 players · 0.3.7");
+        let waiting: serde_json::Value =
+            serde_json::from_str(&presence_payload(&settings, None, None)).unwrap();
+        assert_eq!(waiting["d"]["activities"], json!([]));
     }
 }

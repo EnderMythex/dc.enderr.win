@@ -8,6 +8,7 @@ use crate::{
     app::{roles_of, str_of},
     db::{self, Ticket},
     interactions::Ctx,
+    lang::Lang,
     ui::{self, Msg},
 };
 
@@ -55,36 +56,296 @@ fn is_staff(ctx: &Ctx, config: &GuildConfig) -> bool {
         || ctx.is_admin()
 }
 
-/// Click on "Open a ticket", or a topic picked in the menu.
-pub async fn open(ctx: &Ctx) {
-    let config = ctx.config();
+pub const FORM_PREFIX: &str = "ticket:form:";
+
+/// May this member open a ticket? Answers them when not.
+async fn may_open(ctx: &Ctx, config: &GuildConfig) -> bool {
     let tickets = &config.tickets;
     if !tickets.enabled {
         let text = "The ticket system is turned off.";
-        return ctx
-            .reply(Msg::warning("Unavailable", text).ephemeral())
+        ctx.reply(Msg::warning("Unavailable", text).ephemeral())
             .await;
+        return false;
     }
-    let topic = ctx.data["values"][0]
-        .as_str()
-        .and_then(|index| index.parse::<usize>().ok())
-        .and_then(|index| tickets.topics.get(index))
-        .cloned()
-        .unwrap_or_default();
-
-    let db = &ctx.app.db;
-    let user_id = ctx.user_id();
-    let open = db::open_tickets(db, &ctx.guild_id, user_id)
+    let open = db::open_tickets(&ctx.app.db, &ctx.guild_id, ctx.user_id())
         .await
         .unwrap_or_default();
     if open.len() >= tickets.max_open as usize {
         let list: Vec<String> = open.iter().map(|id| format!("<#{id}>")).collect();
         let text = format!("You already have an open ticket: {}", list.join(", "));
-        return ctx
-            .reply(Msg::warning("Ticket already open", &text).ephemeral())
+        ctx.reply(Msg::warning("Ticket already open", &text).ephemeral())
             .await;
+        return false;
     }
+    true
+}
 
+/// Click on "Open a ticket", or a topic picked in the menu.
+pub async fn open(ctx: &Ctx) {
+    let config = ctx.config();
+    let index = ctx.data["values"][0]
+        .as_str()
+        .and_then(|index| index.parse::<usize>().ok());
+    let topic = index
+        .and_then(|index| config.tickets.topics.get(index))
+        .cloned()
+        .unwrap_or_default();
+    if !may_open(ctx, &config).await {
+        return;
+    }
+    if config.tickets.questions {
+        let lang = form_lang(&config, &topic);
+        let questions = questions(lang, &topic);
+        let fields: Vec<ui::Field> = questions
+            .iter()
+            .map(|q| ui::Field {
+                id: q.id,
+                label: q.label,
+                placeholder: q.placeholder,
+                max: q.max,
+                paragraph: q.paragraph,
+                required: q.required,
+            })
+            .collect();
+        let title = if topic.is_empty() {
+            lang.pick("Ouvrir un ticket", "Open a ticket").to_owned()
+        } else {
+            ui::truncate(&topic, 45)
+        };
+        let id = format!(
+            "{FORM_PREFIX}{}",
+            index.map_or("x".to_owned(), |i| i.to_string())
+        );
+        return ctx.modal(ui::form_modal(&id, &title, &fields)).await;
+    }
+    create(ctx, &config, &topic, None).await;
+}
+
+/// The form of a ticket was sent.
+pub async fn submitted(ctx: &Ctx) {
+    let config = ctx.config();
+    let index = ctx
+        .custom_id()
+        .trim_start_matches(FORM_PREFIX)
+        .parse::<usize>()
+        .ok();
+    let topic = index
+        .and_then(|index| config.tickets.topics.get(index))
+        .cloned()
+        .unwrap_or_default();
+    if !may_open(ctx, &config).await {
+        return;
+    }
+    let lang = form_lang(&config, &topic);
+    let questions = questions(lang, &topic);
+    let answers = answers_text(lang, &questions, |id| {
+        crate::interactions::modal_value(&ctx.data, id).to_owned()
+    });
+    create(ctx, &config, &topic, Some(answers)).await;
+}
+
+// ---------------------------------------------------------------- questions
+
+/// A question of the ticket form (five at most).
+pub struct Question {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub placeholder: &'static str,
+    pub paragraph: bool,
+    pub required: bool,
+    pub max: u32,
+}
+
+/// French for a text with accents or common French words; English
+/// otherwise (topic names are too short for the AI's language detection).
+fn looks_french(text: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "le",
+        "la",
+        "les",
+        "un",
+        "une",
+        "des",
+        "de",
+        "du",
+        "avec",
+        "pour",
+        "sur",
+        "aide",
+        "autre",
+        "signaler",
+        "proposer",
+        "partenariat",
+        "demande",
+        "ton",
+        "ta",
+        "tes",
+        "besoin",
+        "ouvre",
+        "salon",
+    ];
+    let text = text.to_lowercase();
+    text.contains(['é', 'è', 'ê', 'à', 'ç', 'ù', 'ô', 'î', 'û'])
+        || text
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| WORDS.contains(&word))
+}
+
+/// Language of the form: the one of the topic (or of the panel's text).
+fn form_lang(config: &GuildConfig, topic: &str) -> Lang {
+    let text = if topic.is_empty() {
+        &config.tickets.text
+    } else {
+        topic
+    };
+    if looks_french(text) {
+        Lang::Fr
+    } else {
+        Lang::En
+    }
+}
+
+fn is_idea(topic: &str) -> bool {
+    [
+        "feature",
+        "fonctionnalit",
+        "suggest",
+        "idée",
+        "idea",
+        "propos",
+    ]
+    .iter()
+    .any(|word| topic.contains(word))
+}
+
+/// Questions asked for a topic (ported from the Misty bot): a bug, an
+/// idea, or a single general question.
+pub fn questions(lang: Lang, topic: &str) -> Vec<Question> {
+    let q = |id, label, placeholder, paragraph, required, max| Question {
+        id,
+        label,
+        placeholder,
+        paragraph,
+        required,
+        max,
+    };
+    let topic = topic.to_lowercase();
+    if topic.contains("bug") {
+        vec![
+            q(
+                "did",
+                lang.pick("Ce que tu as fait", "What you did"),
+                lang.pick("1. J'ouvre…\n2. Je clique sur…", "1. I open…\n2. I click…"),
+                true,
+                true,
+                1000,
+            ),
+            q(
+                "happened",
+                lang.pick("Ce qui s'est passé", "What happened"),
+                lang.pick(
+                    "Tu pourras ajouter des captures dans le ticket.",
+                    "You can add screenshots in the ticket.",
+                ),
+                true,
+                true,
+                1000,
+            ),
+            q(
+                "expected",
+                lang.pick("Ce que tu attendais", "What you expected"),
+                "",
+                true,
+                true,
+                500,
+            ),
+            q(
+                "always",
+                lang.pick("Ça arrive à chaque fois ?", "Does it happen every time?"),
+                lang.pick("Oui / Non / Parfois", "Yes / No / Sometimes"),
+                false,
+                true,
+                100,
+            ),
+            q(
+                "crash",
+                lang.pick("Code de crash (facultatif)", "Crash code (optional)"),
+                "MR-XXXXXXX",
+                false,
+                false,
+                40,
+            ),
+        ]
+    } else if is_idea(&topic) {
+        vec![
+            q(
+                "idea",
+                lang.pick("L'idée", "The idea"),
+                lang.pick("Pouvoir…", "Being able to…"),
+                true,
+                true,
+                1000,
+            ),
+            q(
+                "why",
+                lang.pick("Pourquoi : ce que ça améliore", "Why: what it makes better"),
+                "",
+                true,
+                true,
+                1000,
+            ),
+            q(
+                "how",
+                lang.pick("Comment ça pourrait marcher", "How it could work"),
+                lang.pick("Facultatif.", "Optional."),
+                true,
+                false,
+                1000,
+            ),
+        ]
+    } else {
+        vec![q(
+            "text",
+            lang.pick("Explique ta demande", "Explain your request"),
+            lang.pick("Que se passe-t-il ?", "What's going on?"),
+            true,
+            true,
+            1500,
+        )]
+    }
+}
+
+/// The answers as the text posted in the ticket (empty ones left out).
+pub fn answers_text(lang: Lang, questions: &[Question], answer: impl Fn(&str) -> String) -> String {
+    let mut out = Vec::new();
+    for question in questions {
+        let text = answer(question.id);
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let text = ui::truncate(text, 1000);
+        if questions.len() == 1 {
+            out.push(text);
+        } else if question.id == "crash" {
+            out.push(format!(
+                "**{}** `{}`",
+                lang.pick("Code de crash", "Crash code"),
+                text.replace('`', "")
+            ));
+        } else {
+            out.push(format!("**{}**\n{text}", question.label));
+        }
+    }
+    out.join("\n\n")
+}
+
+/// Creates the ticket channel; `answers`: the form, posted in it.
+async fn create(ctx: &Ctx, config: &GuildConfig, topic: &str, answers: Option<String>) {
+    let tickets = &config.tickets;
+    let topic = topic.to_owned();
+    let db = &ctx.app.db;
+    let user_id = ctx.user_id();
     ctx.defer(true).await;
     let number = match db::next_ticket_number(db, &ctx.guild_id).await {
         Ok(number) => number,
@@ -151,21 +412,24 @@ pub async fn open(ctx: &Ctx) {
         .iter()
         .map(|role| format!("<@&{role}>"))
         .collect();
-    let mut intro = Msg::card(
-        ui::WHITE,
-        vec![
-            ui::text(heading),
-            ui::text(format!(
-                "Hello <@{user_id}>, describe your request here. The staff will answer as soon as possible."
-            )),
-            ui::separator(),
-            ui::row(vec![
-                ui::button(ui::STYLE_SECONDARY, "Claim", "ticket:claim"),
-                ui::button(ui::STYLE_DANGER, "Close", "ticket:close"),
-            ]),
-        ],
-    )
-    .ping(user_id);
+    let welcome = if answers.is_some() {
+        format!("Hello <@{user_id}>, the staff will answer here as soon as possible.")
+    } else {
+        format!(
+            "Hello <@{user_id}>, describe your request here. The staff will answer as soon as possible."
+        )
+    };
+    let mut blocks = vec![ui::text(heading), ui::text(welcome)];
+    if let Some(answers) = answers.filter(|a| !a.is_empty()) {
+        blocks.push(ui::separator());
+        blocks.push(ui::text(ui::truncate(&answers, 3000)));
+    }
+    blocks.push(ui::separator());
+    blocks.push(ui::row(vec![
+        ui::button(ui::STYLE_SECONDARY, "Claim", "ticket:claim"),
+        ui::button(ui::STYLE_DANGER, "Close", "ticket:close"),
+    ]));
+    let mut intro = Msg::card(ui::WHITE, blocks).ping(user_id);
     if !staff.is_empty() {
         intro
             .components
@@ -375,6 +639,50 @@ fn transcript_line(message: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ticket_forms() {
+        let bug = questions(Lang::Fr, "Signaler un bug");
+        assert_eq!(bug.len(), 5);
+        assert!(!bug[4].required);
+        assert_eq!(questions(Lang::En, "Suggest a feature").len(), 3);
+        assert_eq!(questions(Lang::En, "Other").len(), 1);
+        for (topic, french) in [
+            ("Signaler un bug", true),
+            ("Aide avec le launcher", true),
+            ("Report a bug", false),
+            ("Launcher help", false),
+            ("Suggest a feature", false),
+        ] {
+            assert_eq!(looks_french(topic), french, "{topic}");
+        }
+        // Discord limits: 45 characters per label, 100 per placeholder.
+        for (lang, topic) in [
+            (Lang::Fr, "bug"),
+            (Lang::En, "bug"),
+            (Lang::Fr, "idée"),
+            (Lang::En, "idea"),
+            (Lang::En, "x"),
+        ] {
+            for q in questions(lang, topic) {
+                assert!(q.label.chars().count() <= 45 && q.placeholder.chars().count() <= 100);
+            }
+        }
+        let text = answers_text(Lang::Fr, &bug, |id| match id {
+            "did" => "Je lance".into(),
+            "crash" => "MR-AB12CD3".into(),
+            _ => String::new(),
+        });
+        assert_eq!(
+            text,
+            "**Ce que tu as fait**
+Je lance
+
+**Code de crash** `MR-AB12CD3`"
+        );
+        let single = questions(Lang::En, "Other");
+        assert_eq!(answers_text(Lang::En, &single, |_| " Help ".into()), "Help");
+    }
 
     #[test]
     fn panel_offers_button_or_topics() {

@@ -405,6 +405,9 @@ async fn modal_submit(ctx: &Ctx) {
     if ctx.custom_id().starts_with("announce:") {
         return announce::submitted(ctx).await;
     }
+    if ctx.custom_id().starts_with(tickets::FORM_PREFIX) {
+        return tickets::submitted(ctx).await;
+    }
     match str_of(&ctx.data, "custom_id") {
         "verify:code" => verify::check_code(ctx).await,
         _ => {
