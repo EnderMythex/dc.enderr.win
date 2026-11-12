@@ -31,6 +31,7 @@ mod scanline;
 mod settings;
 mod sol;
 mod tickets;
+mod todo;
 mod twitch;
 mod ui;
 mod uptime;

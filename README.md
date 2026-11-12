@@ -83,6 +83,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | GitHub activity | — | GitHub activity: repositories, channel, commits / pull requests / issues / stars / forks / tags |
 | Status panel | `/status` (misty pack) | Status panel: websites (up, slow, down, with history), version, downloads, players, stars |
 | Minecraft server | `/smp` (misty pack) | Minecraft server: address (SRV records followed), name, description, players, panel channel |
+| Staff tasks | `/todo add`, `claim`, `unclaim`, `finish`, `remove`, `list` (misty pack) | Panel channel, staff roles, title, text, last finished tasks, look. Each task has a Claim button on its right, then Finish once claimed; an Add a task button opens a form |
 | Settings panel | `/settings view`: image of the configuration, a menu per module, buttons and pickers to change it; `/help` | Everything |
 
 **Who is an admin?** Moderation and settings commands are reserved to: the

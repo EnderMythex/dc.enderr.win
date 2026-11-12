@@ -48,7 +48,16 @@ pub const MODULES: &[(&str, &str)] = &[
     ("github", "GitHub activity"),
     ("status", "Status panel"),
     ("minecraft", "Minecraft server"),
+    ("todo", "Staff tasks"),
 ];
+
+/// Sections only bots with a given command pack have.
+pub fn module_pack(module: &str) -> Option<&'static str> {
+    match module {
+        "todo" => Some(dc_core::commands::MISTY),
+        _ => None,
+    }
+}
 
 fn module_label(module: &str) -> &str {
     MODULES
@@ -77,6 +86,7 @@ const TESTABLE: &[&str] = &[
     "github",
     "status",
     "minecraft",
+    "todo",
 ];
 
 /// Checks access and loads everything a server page needs. 404 when the bot
@@ -93,6 +103,9 @@ async fn page_data(
         return Err(AppError::NotFound);
     }
     let def = owned_bot(state, session, slug).await?;
+    if module_pack(module).is_some_and(|pack| !def.packs.iter().any(|p| p == pack)) {
+        return Err(AppError::NotFound);
+    }
     let token = def.token().ok_or(AppError::NotFound)?;
     let context = state
         .discord
@@ -154,6 +167,7 @@ pub struct GuildForm {
     name: String,
     description: String,
     show_players: Option<String>,
+    show_done: Option<String>,
     questions: Option<String>,
     custom_color: Option<String>,
     color: String,
@@ -262,6 +276,7 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
         "verification" => config.rules.verify_look = look,
         "tickets" => config.tickets.look = look,
         "roles" => config.role_panel.look = look,
+        "todo" => config.todo.look = look,
         "releases" => config.releases.look.color = look.color,
         "github" => config.github.color = look.color,
         _ => {}
@@ -440,6 +455,15 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             minecraft.description = form.description;
             minecraft.show_players = form.show_players.is_some();
         }
+        "todo" => {
+            let todo = &mut config.todo;
+            todo.enabled = enabled;
+            todo.channel = optional(form.channel);
+            todo.staff_roles = form.roles;
+            todo.title = form.title;
+            todo.text = form.text;
+            todo.show_done = form.show_done.is_some();
+        }
         _ => {}
     }
 }
@@ -609,6 +633,7 @@ fn section_name(key: &str) -> String {
         "github" => "GitHub activity",
         "status" => "Status panel",
         "minecraft" => "Minecraft server",
+        "todo" => "Staff tasks",
         "assistant" => "AI assistant",
         "reminders" => "Safety reminders",
         other => return capitalized(other),
@@ -1017,7 +1042,8 @@ pub async fn preview(
         "banner-rules.png"
         | "banner-verification.png"
         | "banner-tickets.png"
-        | "banner-roles.png" => {
+        | "banner-roles.png"
+        | "banner-todo.png" => {
             let config = GuildConfig::load(&def.dir, &guild_id)?;
             let (look, title) = match image.as_str() {
                 "banner-rules.png" => (&config.rules.look, &config.rules.title),
@@ -1025,6 +1051,7 @@ pub async fn preview(
                     (&config.rules.verify_look, &config.rules.verify_title)
                 }
                 "banner-tickets.png" => (&config.tickets.look, &config.tickets.title),
+                "banner-todo.png" => (&config.todo.look, &config.todo.title),
                 _ => (&config.role_panel.look, &config.role_panel.title),
             };
             let label = if look.label.is_empty() {

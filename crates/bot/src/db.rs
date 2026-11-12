@@ -87,6 +87,20 @@ pub async fn init(db: &SqlitePool) -> Result<(), sqlx::Error> {
             hash       TEXT NOT NULL,
             PRIMARY KEY (guild_id, kind)
         )",
+        "CREATE TABLE IF NOT EXISTS todos (
+            guild_id   TEXT NOT NULL,
+            number     INTEGER NOT NULL,
+            title      TEXT NOT NULL,
+            details    TEXT NOT NULL DEFAULT '',
+            author_id  TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            claimed_by TEXT,
+            claimed_at INTEGER,
+            done       INTEGER NOT NULL DEFAULT 0,
+            done_by    TEXT,
+            done_at    INTEGER,
+            PRIMARY KEY (guild_id, number)
+        )",
     ] {
         sqlx::query(statement).execute(db).await?;
     }
@@ -761,4 +775,226 @@ pub async fn set_counter(
     .execute(db)
     .await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- staff tasks
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct Todo {
+    pub guild_id: String,
+    pub number: i64,
+    pub title: String,
+    pub details: String,
+    pub author_id: String,
+    pub created_at: i64,
+    pub claimed_by: Option<String>,
+    pub claimed_at: Option<i64>,
+    pub done: bool,
+    pub done_by: Option<String>,
+    pub done_at: Option<i64>,
+}
+
+const TODO_COLUMNS: &str = "guild_id, number, title, details, author_id, created_at, \
+    claimed_by, claimed_at, done, done_by, done_at";
+
+/// Finished tasks kept per server (the older ones are deleted).
+const TODO_DONE_KEPT: i64 = 50;
+
+/// Adds a task, claimed right away by `claimed_by` if given, and returns
+/// its number on the server (#1, #2...).
+pub async fn create_todo(
+    db: &SqlitePool,
+    guild: &str,
+    (title, details): (&str, &str),
+    author: &str,
+    claimed_by: Option<&str>,
+) -> Result<i64, sqlx::Error> {
+    let number: i64 = sqlx::query_scalar(
+        "INSERT INTO counters (guild_id, name, value) VALUES (?, 'todo', 1)
+         ON CONFLICT (guild_id, name) DO UPDATE SET value = value + 1
+         RETURNING value",
+    )
+    .bind(guild)
+    .fetch_one(db)
+    .await?;
+    let now = dc_core::now();
+    sqlx::query(
+        "INSERT INTO todos (guild_id, number, title, details, author_id, created_at, claimed_by, claimed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(guild)
+    .bind(number)
+    .bind(title)
+    .bind(details)
+    .bind(author)
+    .bind(now)
+    .bind(claimed_by)
+    .bind(claimed_by.map(|_| now))
+    .execute(db)
+    .await?;
+    Ok(number)
+}
+
+pub async fn get_todo(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+) -> Result<Option<Todo>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {TODO_COLUMNS} FROM todos WHERE guild_id = ? AND number = ?"
+    ))
+    .bind(guild)
+    .bind(number)
+    .fetch_optional(db)
+    .await
+}
+
+/// Tasks still to do, oldest first.
+pub async fn open_todos(db: &SqlitePool, guild: &str) -> Result<Vec<Todo>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {TODO_COLUMNS} FROM todos WHERE guild_id = ? AND done = 0 ORDER BY number"
+    ))
+    .bind(guild)
+    .fetch_all(db)
+    .await
+}
+
+/// The last finished tasks, newest first.
+pub async fn done_todos(
+    db: &SqlitePool,
+    guild: &str,
+    limit: i64,
+) -> Result<Vec<Todo>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {TODO_COLUMNS} FROM todos WHERE guild_id = ? AND done = 1
+         ORDER BY done_at DESC, number DESC LIMIT ?"
+    ))
+    .bind(guild)
+    .bind(limit)
+    .fetch_all(db)
+    .await
+}
+
+/// Claims an open task nobody has claimed. `false` when it is done, gone or
+/// already claimed (two clicks at the same time: only one wins).
+pub async fn claim_todo(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    user: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE todos SET claimed_by = ?, claimed_at = ?
+         WHERE guild_id = ? AND number = ? AND done = 0 AND claimed_by IS NULL",
+    )
+    .bind(user)
+    .bind(dc_core::now())
+    .bind(guild)
+    .bind(number)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn unclaim_todo(db: &SqlitePool, guild: &str, number: i64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE todos SET claimed_by = NULL, claimed_at = NULL
+         WHERE guild_id = ? AND number = ? AND done = 0 AND claimed_by IS NOT NULL",
+    )
+    .bind(guild)
+    .bind(number)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Marks an open task done. `false` when it was already done or is gone.
+pub async fn finish_todo(
+    db: &SqlitePool,
+    guild: &str,
+    number: i64,
+    user: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE todos SET done = 1, done_by = ?, done_at = ?
+         WHERE guild_id = ? AND number = ? AND done = 0",
+    )
+    .bind(user)
+    .bind(dc_core::now())
+    .bind(guild)
+    .bind(number)
+    .execute(db)
+    .await?;
+    sqlx::query(
+        "DELETE FROM todos WHERE guild_id = ? AND done = 1 AND number NOT IN (
+            SELECT number FROM todos WHERE guild_id = ? AND done = 1
+            ORDER BY done_at DESC, number DESC LIMIT ?
+        )",
+    )
+    .bind(guild)
+    .bind(guild)
+    .bind(TODO_DONE_KEPT)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn delete_todo(db: &SqlitePool, guild: &str, number: i64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM todos WHERE guild_id = ? AND number = ?")
+        .bind(guild)
+        .bind(number)
+        .execute(db)
+        .await?;
+    Ok(result.rows_affected() == 1)
+}
+
+#[cfg(test)]
+mod todo_tests {
+    use super::*;
+
+    async fn memory() -> SqlitePool {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        init(&db).await.unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn todos() {
+        let db = memory().await;
+        let one = create_todo(&db, "g", ("Pizza module", ""), "1", None)
+            .await
+            .unwrap();
+        let two = create_todo(&db, "g", ("Docs", "the wiki"), "1", Some("5"))
+            .await
+            .unwrap();
+        assert_eq!((one, two), (1, 2));
+        let other = create_todo(&db, "h", ("Other", ""), "1", None).await;
+        assert_eq!(other.unwrap(), 1);
+
+        assert!(claim_todo(&db, "g", 1, "7").await.unwrap());
+        // Already claimed: the second click loses.
+        assert!(!claim_todo(&db, "g", 1, "8").await.unwrap());
+        let claimed = get_todo(&db, "g", 1).await.unwrap().unwrap();
+        assert_eq!(claimed.claimed_by.as_deref(), Some("7"));
+        assert!(unclaim_todo(&db, "g", 1).await.unwrap());
+        assert!(claim_todo(&db, "g", 1, "8").await.unwrap());
+
+        assert!(finish_todo(&db, "g", 1, "8").await.unwrap());
+        assert!(!finish_todo(&db, "g", 1, "8").await.unwrap());
+        assert!(!claim_todo(&db, "g", 1, "9").await.unwrap());
+        let open = open_todos(&db, "g").await.unwrap();
+        assert_eq!(open.iter().map(|t| t.number).collect::<Vec<_>>(), vec![2]);
+        let done = done_todos(&db, "g", 5).await.unwrap();
+        assert_eq!(done[0].done_by.as_deref(), Some("8"));
+
+        assert!(delete_todo(&db, "g", 2).await.unwrap());
+        assert!(open_todos(&db, "g").await.unwrap().is_empty());
+        // Numbers are never reused.
+        let next = create_todo(&db, "g", ("Next", ""), "1", None).await;
+        assert_eq!(next.unwrap(), 3);
+    }
 }

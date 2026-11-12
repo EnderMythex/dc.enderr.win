@@ -119,6 +119,8 @@ pub async fn sync(app: &App, guild_id: &str) {
         .map(|channel| (channel, rolepanel::panel(&config)));
     sync_one(app, guild_id, "roles", role_panel).await;
 
+    crate::todo::sync(app, guild_id).await;
+
     // The status and Minecraft panels (checked over the network).
     crate::uptime::refresh(app, guild_id, false).await;
 }

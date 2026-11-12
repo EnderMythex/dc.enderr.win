@@ -1613,6 +1613,22 @@ fn guild_fields(
                 }))
             }
         }
+        "todo" => {
+            let todo = &config.todo;
+            html! {
+                h2 { "Staff tasks" }
+                (switch("enabled", "Show the staff tasks", "A panel lists the tasks to do. Each one has a Claim button on its right; once claimed it becomes Finish. The staff adds tasks with the Add a task button or /todo add.", todo.enabled))
+                (channel_select("channel", "Panel channel", "A channel only the staff can see.", text_channels(), &todo.channel))
+                (role_checks("roles", "Staff roles", "These roles can add, claim and finish tasks. The bot admins always can. Only the member who claimed a task (or an admin) can finish it or give it back.", &risks, &todo.staff_roles, "staff"))
+                (field("title", "Panel title", "", html! {
+                    input #title type="text" name="title" value=(todo.title) maxlength="80" required;
+                }))
+                (textarea("text", "Panel text", "Optional, shown above the tasks.", &todo.text, 3, 1800))
+                (switch("show_done", "Show the last finished tasks", "The 3 last ones, crossed out, under the open tasks.", todo.show_done))
+                (look_fields(&todo.look, true))
+                p.hint { "The panel shows 7 tasks at most (a Discord limit); /todo list shows all of them." }
+            }
+        }
         "minecraft" => {
             let minecraft = &config.minecraft;
             html! {
@@ -1767,6 +1783,41 @@ fn guild_preview(
                 html! {},
                 "Post the panel again",
                 "Deletes the role panel and posts it again at the bottom of its channel.",
+            )
+        }
+        "todo" => {
+            let todo = &config.todo;
+            PREVIEW_ACCENT.with(|a| a.set(Some(todo.look.color_or(0xEDEDED))));
+            let blocks = html! {
+                (look_heading(&todo.look, &todo.title, base, "todo"))
+                @if !todo.text.is_empty() { p.dtext { (todo.text) } }
+                div.dsplit {
+                    p.dtext {
+                        strong { "#1 · Module Pizza Feature On Misty Bot" }
+                        "\n"
+                        span.dsmall { "Open · added by @" (me) " just now" }
+                    }
+                    span.dbtn.primary { "🙋 Claim" }
+                }
+                div.dsplit {
+                    p.dtext {
+                        strong { "#2 · Update the wiki" }
+                        "\n"
+                        span.dsmall { "Claimed by @" (me) " 5 minutes ago" }
+                    }
+                    span.dbtn.ok { "✅ Finish" }
+                }
+                @if todo.show_done {
+                    p.dtext { strong { "Done recently" } }
+                    p.dsmall { "✅ " s { "#0 Launcher 0.3.7" } " · @" (me) " 1 hour ago" }
+                }
+                span.dbtn { "➕ Add a task" }
+            };
+            (
+                blocks,
+                html! {},
+                "Post the panel again",
+                "Deletes the task panel and posts it again at the bottom of its channel.",
             )
         }
         "reminders" => {
@@ -2164,6 +2215,7 @@ fn section_on(config: &GuildConfig, id: &str) -> Option<bool> {
         "github" => config.github.enabled,
         "status" => config.status.enabled,
         "minecraft" => config.minecraft.enabled,
+        "todo" => config.todo.enabled,
         _ => return None,
     })
 }
@@ -2176,7 +2228,7 @@ const NAV_GROUPS: &[(&str, &[&str])] = &[
         &["welcome", "rules", "verification", "roles", "levels"],
     ),
     ("Protection", &["links", "security", "reminders"]),
-    ("Community", &["tickets", "assistant"]),
+    ("Community", &["tickets", "todo", "assistant"]),
     (
         "Integrations",
         &["twitch", "releases", "github", "status", "minecraft"],
@@ -2212,6 +2264,9 @@ fn section_icon(id: &str) -> &'static str {
             r#"<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11 6"/>"#
         }
         "status" => r#"<path d="M3 12h4l3-7 4 14 3-7h4"/>"#,
+        "todo" => {
+            r#"<path d="M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17M11 6h9M11 12h9M11 18h9"/>"#
+        }
         "minecraft" => {
             r#"<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h3v3H8zM13 9h3v3h-3zM10 13h4v4h-4z"/>"#
         }
@@ -2231,7 +2286,10 @@ fn section_label(id: &str) -> &'static str {
 }
 
 /// The sections of a server, grouped, with a dot for the ones in use.
-fn side_nav(base: &str, config: &GuildConfig, module: &str) -> Markup {
+fn side_nav(base: &str, bot: &BotView, config: &GuildConfig, module: &str) -> Markup {
+    let shown = |id: &str| {
+        crate::guilds::module_pack(id).is_none_or(|pack| bot.def.packs.iter().any(|p| p == pack))
+    };
     let link = |id: &str| {
         let active = id == module;
         html! {
@@ -2252,7 +2310,7 @@ fn side_nav(base: &str, config: &GuildConfig, module: &str) -> Markup {
         nav.side-nav aria-label="Server settings" {
             @for (group, ids) in NAV_GROUPS {
                 p.side-group { (group) }
-                @for id in *ids { (link(id)) }
+                @for id in ids.iter().filter(|id| shown(id)) { (link(id)) }
             }
             div.side-sep {}
             (link(DANGER))
@@ -2403,10 +2461,10 @@ fn guild_shell(
                 span.side-group { "Section" }
                 strong { (section_label(module)) }
             }
-            (side_nav(&base, config, module))
+            (side_nav(&base, bot, config, module))
         }
         div.guild-layout {
-            (side_nav(&base, config, module))
+            (side_nav(&base, bot, config, module))
             div.guild-main { (main) }
         }
     };

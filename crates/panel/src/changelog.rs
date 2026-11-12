@@ -11,6 +11,16 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-12-todo",
+        date: "2026-11-12",
+        title: "Staff tasks on Misty Bot",
+        items: &[
+            "New section Staff tasks: a panel with each task to do and a button on its right, Claim, then Finish once claimed.",
+            "The staff adds tasks with the Add a task button or /todo add (optionally claimed for someone), and uses /todo claim, unclaim, finish, remove and list.",
+            "Only the member who claimed a task, or a bot admin, can finish it or give it back. The last finished tasks show crossed out.",
+        ],
+    },
+    Entry {
         id: "2026-11-12-captcha-commands",
         date: "2026-11-12",
         title: "Your own captcha picture, commands on and off",

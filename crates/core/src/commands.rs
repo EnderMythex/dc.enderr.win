@@ -61,7 +61,8 @@ fn user_and_reason(what: &str) -> Vec<Value> {
 /// Pack of the Scanline bot (`packs = ["scanline"]` in `bot.toml`).
 pub const SCANLINE: &str = "scanline";
 
-/// Pack of the Misty bot: release, download, status and Minecraft commands.
+/// Pack of the Misty bot: release, download, status, Minecraft and staff
+/// task commands.
 pub const MISTY: &str = "misty";
 
 /// Commands every member can use; the others are for bot admins.
@@ -107,7 +108,46 @@ pub fn misty() -> Vec<Value> {
             "Minecraft server: address, players and status",
             vec![],
         ),
+        command(
+            "todo",
+            "Tasks of the staff",
+            vec![
+                sub(
+                    "add",
+                    "Add a task to the panel",
+                    vec![
+                        {
+                            let mut title = option(STRING, "task", "What has to be done", true);
+                            title["max_length"] = json!(100);
+                            title
+                        },
+                        {
+                            let mut details =
+                                option(STRING, "details", "More about it (optional)", false);
+                            details["max_length"] = json!(400);
+                            details
+                        },
+                        option(USER, "assign", "Claim it for this staff member", false),
+                    ],
+                ),
+                sub("claim", "Claim a task", vec![todo_id()]),
+                sub(
+                    "unclaim",
+                    "Give a claimed task back to the staff",
+                    vec![todo_id()],
+                ),
+                sub("finish", "Mark a task done", vec![todo_id()]),
+                sub("remove", "Delete a task", vec![todo_id()]),
+                sub("list", "The open tasks, with yours first", vec![]),
+            ],
+        ),
     ]
+}
+
+fn todo_id() -> Value {
+    let mut id = option(INTEGER, "id", "Task number, e.g. 3 for #3", true);
+    id["min_value"] = json!(1);
+    id
 }
 
 /// The commands to register: those of the bot without the ones turned off.

@@ -331,6 +331,10 @@ async fn command(ctx: &Ctx) {
         {
             return crate::misty::command(ctx, name).await;
         }
+        // The staff of the section can use it, not only the bot admins.
+        "todo" if ctx.app.packs.iter().any(|pack| pack == crate::misty::PACK) => {
+            return crate::todo::command(ctx, &options).await;
+        }
         _ => {}
     }
 
@@ -390,6 +394,9 @@ async fn component(ctx: &Ctx) {
     if id.starts_with(antiscam::UNBAN_PREFIX) {
         return antiscam::unban(ctx).await;
     }
+    if id.starts_with(crate::todo::PREFIX) {
+        return crate::todo::component(ctx).await;
+    }
     if id == crate::uptime::REFRESH || id == crate::minecraft::REFRESH {
         return crate::misty::refresh(ctx).await;
     }
@@ -418,6 +425,7 @@ async fn modal_submit(ctx: &Ctx) {
     }
     match str_of(&ctx.data, "custom_id") {
         "verify:code" => verify::check_code(ctx).await,
+        crate::todo::FORM => crate::todo::submitted(ctx).await,
         _ => {
             ctx.reply(Msg::error("This form is no longer active."))
                 .await

@@ -60,6 +60,7 @@ pub struct GuildConfig {
     pub github: GitHubFeed,
     pub status: StatusPanel,
     pub minecraft: Minecraft,
+    pub todo: Todo,
 }
 
 /// How a panel looks on Discord: the color of its side bar and an optional
@@ -223,6 +224,41 @@ impl Default for Minecraft {
             description: String::new(),
             show_players: true,
             channel: None,
+        }
+    }
+}
+
+/// Tasks of the staff: a panel listing them, each with a Claim then a
+/// Finish button, and `/todo`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Todo {
+    pub enabled: bool,
+    /// Channel of the panel.
+    pub channel: Option<String>,
+    /// Besides the bot admins, these roles can add, claim and finish tasks.
+    pub staff_roles: Vec<String>,
+    pub title: String,
+    pub text: String,
+    /// Lists the last finished tasks under the open ones.
+    pub show_done: bool,
+    pub look: Look,
+}
+
+impl Default for Todo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel: None,
+            staff_roles: Vec::new(),
+            title: "Staff tasks".into(),
+            text: String::new(),
+            show_done: true,
+            look: Look {
+                banner: true,
+                label: "To do".into(),
+                ..Look::default()
+            },
         }
     }
 }
@@ -834,6 +870,11 @@ impl GuildConfig {
         self.tickets.look.sanitize();
         self.role_panel.look.sanitize();
         self.releases.look.sanitize();
+        self.todo.look.sanitize();
+        clean_id(&mut self.todo.channel);
+        clean_ids(&mut self.todo.staff_roles);
+        clean_text(&mut self.todo.title, MAX_TITLE, &defaults.todo.title);
+        self.todo.text = self.todo.text.trim().chars().take(MAX_TEXT).collect();
         self.github.color = parse_color(&self.github.color).unwrap_or_default();
 
         let releases = &mut self.releases;

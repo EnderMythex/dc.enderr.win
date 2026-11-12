@@ -238,7 +238,7 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
                 Ok(format!("Reminder sent to {}.", posted.join(" and ")))
             };
         }
-        "rules" | "tickets" | "roles" | "verification" => {
+        "rules" | "tickets" | "roles" | "verification" | "todo" => {
             let (enabled, channel) = match module {
                 "rules" => (config.rules.enabled, config.rules.channel.clone()),
                 "verification" => {
@@ -256,6 +256,7 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
                     config.role_panel.enabled && !config.role_panel.buttons.is_empty(),
                     config.role_panel.channel.clone(),
                 ),
+                "todo" => (config.todo.enabled, config.todo.channel.clone()),
                 _ => (config.tickets.enabled, config.tickets.panel_channel.clone()),
             };
             let Some(channel) = channel.filter(|_| enabled) else {
