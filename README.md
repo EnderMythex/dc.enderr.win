@@ -20,6 +20,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
   bots/<slug>/compose.yaml   the bot's container                     (committed)
   bots/<slug>/.env           DISCORD_TOKEN=..., DISCORD_CLIENT_SECRET (secret, git-ignored)
   bots/<slug>/settings.json  presence, written by the panel          (git-ignored)
+  bots/<slug>/background     picture behind the cards, from the panel (git-ignored)
   bots/<slug>/guilds/        one JSON per server, written by the     (git-ignored)
                              panel and by the bot's /settings
   bots/<slug>/data/bot.db    the bot's database: XP, tickets, panels (git-ignored)
@@ -30,6 +31,12 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 - **Assignment** is done by Discord user id in `owners` of `bot.toml`. Users
   only see their bots; other bots return 404. Ids in `ADMIN_IDS` (panel `.env`)
   see and manage every bot. `bot.toml` changes need no panel restart.
+- The **Commands** tab lists every slash command of the bot (its packs
+  included), split between those for everyone and those for bot admins.
+- **Card background** (Settings tab): a picture drawn behind every image the
+  bot sends (notices, welcome, rank, leaderboard, settings panel), darkened
+  by a chosen percentage, stored as `bots/<slug>/background`. The bot picks
+  it up within a few seconds; the server previews use it too.
 - **From the panel**, owners start / stop / restart the container, read its
   logs (and, under them, the panel activity: who changed the profile, the
   presence, a server section and what changed, tests, backups…), set the bot's name, bio, picture, banner and presence, and configure each server

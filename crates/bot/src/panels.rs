@@ -188,11 +188,24 @@ fn modified(path: &std::path::Path) -> Option<SystemTime> {
         .ok()
 }
 
+/// Loads the picture drawn behind the bot's cards (changed on the panel).
+pub fn apply_background(app: &App) {
+    let dim = BotSettings::load(&app.dir)
+        .map(|settings| settings.background_dim)
+        .unwrap_or(dc_core::settings::BACKGROUND_DIM);
+    let background = dc_core::render::Background::load(&app.dir, dim);
+    tracing::info!(enabled = background.is_some(), "card background loaded");
+    dc_core::render::set_background(background);
+}
+
 /// Background task: notices configuration files changed by the dashboard and
-/// applies them (panels and presence) within a few seconds.
+/// applies them (panels, presence, card background) within a few seconds.
 pub async fn watch(app: Arc<App>) {
     let settings_path = app.dir.join(dc_core::settings::FILE_NAME);
     let mut settings_seen = modified(&settings_path);
+    let background_path = app.dir.join(dc_core::render::BACKGROUND_FILE);
+    let mut background_seen = modified(&background_path);
+    apply_background(&app);
     let mut seen: HashMap<String, SystemTime> = HashMap::new();
     let mut first_pass = true;
 
@@ -200,9 +213,16 @@ pub async fn watch(app: Arc<App>) {
         tokio::time::sleep(POLL_INTERVAL).await;
 
         let settings_now = modified(&settings_path);
-        if settings_now != settings_seen {
+        let background_now = modified(&background_path);
+        let settings_changed = settings_now != settings_seen;
+        if settings_changed {
             settings_seen = settings_now;
             apply_presence(&app);
+        }
+        // The darkening lives in settings.json, the picture in its own file.
+        if settings_changed || background_now != background_seen {
+            background_seen = background_now;
+            apply_background(&app);
         }
 
         let Ok(entries) = std::fs::read_dir(app.dir.join(guild::DIR_NAME)) else {

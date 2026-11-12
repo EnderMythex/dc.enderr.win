@@ -5,7 +5,6 @@
 use std::{path::PathBuf, sync::LazyLock};
 
 use regex::Regex;
-use serde_json::Value;
 
 use crate::{
     app::App,
@@ -14,7 +13,7 @@ use crate::{
     ui::{self, Msg},
 };
 
-pub const PACK: &str = "scanline";
+pub const PACK: &str = dc_core::commands::SCANLINE;
 pub const FILTER_PREFIX: &str = "filters:";
 
 fn asset(app: &App, name: &str) -> PathBuf {
@@ -197,23 +196,6 @@ pub async fn filter_choice(ctx: &Ctx) {
     ctx.defer(true).await;
     ctx.reply(filters(&ctx.app, &choice, ctx.lang()).ephemeral())
         .await;
-}
-
-/// Commands of the pack, for the registration.
-pub fn commands() -> Vec<Value> {
-    let command = |name: &str, description: &str| serde_json::json!({ "name": name, "description": description, "options": [], "contexts": [0] });
-    vec![
-        command(
-            "filters",
-            "Get my filters to import (Axiom Solana, Axiom Robinhood or Terminal)",
-        ),
-        command(
-            "tools",
-            "Useful links: Axiom, Padre, Mockape, Incinerator, real-time tweets",
-        ),
-        command("tuto-terminal", "Get the Terminal (Padre) setup tutorial"),
-        command("wallet-tracker", "Get my Axiom wallet tracker to import"),
-    ]
 }
 
 #[cfg(test)]

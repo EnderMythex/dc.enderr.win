@@ -1,4 +1,5 @@
-//! Slash command definitions, registered with Discord at startup.
+//! Slash command definitions: registered with Discord by the bot at
+//! startup, and listed on the panel's Commands tab.
 
 use serde_json::{Value, json};
 
@@ -57,13 +58,110 @@ fn user_and_reason(what: &str) -> Vec<Value> {
     ]
 }
 
+/// Pack of the Scanline bot (`packs = ["scanline"]` in `bot.toml`).
+pub const SCANLINE: &str = "scanline";
+
+/// Commands every member can use; the others are for bot admins.
+pub const PUBLIC: &[&str] = &[
+    "rank",
+    "leaderboard",
+    "help",
+    "filters",
+    "tools",
+    "tuto-terminal",
+    "wallet-tracker",
+];
+
 /// Every command of a bot: the common ones and those of its packs.
 pub fn for_bot(packs: &[String]) -> Vec<Value> {
     let mut commands = all();
-    if packs.iter().any(|pack| pack == crate::scanline::PACK) {
-        commands.extend(crate::scanline::commands());
+    if packs.iter().any(|pack| pack == SCANLINE) {
+        commands.extend(scanline());
     }
     commands
+}
+
+/// Commands of the `scanline` pack.
+pub fn scanline() -> Vec<Value> {
+    vec![
+        command(
+            "filters",
+            "Get my filters to import (Axiom Solana, Axiom Robinhood or Terminal)",
+            vec![],
+        ),
+        command(
+            "tools",
+            "Useful links: Axiom, Padre, Mockape, Incinerator, real-time tweets",
+            vec![],
+        ),
+        command(
+            "tuto-terminal",
+            "Get the Terminal (Padre) setup tutorial",
+            vec![],
+        ),
+        command(
+            "wallet-tracker",
+            "Get my Axiom wallet tracker to import",
+            vec![],
+        ),
+    ]
+}
+
+/// One line per command and subcommand, for the panel:
+/// `(usage, description, options)`, e.g. `("/role add", "...", ["user", "role"])`.
+pub struct Listed {
+    pub usage: String,
+    pub description: String,
+    /// Option names, `?` after the optional ones.
+    pub options: Vec<String>,
+    pub public: bool,
+}
+
+pub fn listing(packs: &[String]) -> Vec<Listed> {
+    fn options_of(value: &Value) -> Vec<String> {
+        value["options"]
+            .as_array()
+            .map(|options| {
+                options
+                    .iter()
+                    .map(|option| {
+                        let name = option["name"].as_str().unwrap_or_default();
+                        if option["required"].as_bool().unwrap_or(false) {
+                            name.to_owned()
+                        } else {
+                            format!("{name}?")
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    let mut out = Vec::new();
+    for command in for_bot(packs) {
+        let name = command["name"].as_str().unwrap_or_default().to_owned();
+        let public = PUBLIC.contains(&name.as_str());
+        let subs: Vec<&Value> = command["options"]
+            .as_array()
+            .map(|options| options.iter().filter(|o| o["type"] == SUB).collect())
+            .unwrap_or_default();
+        if subs.is_empty() {
+            out.push(Listed {
+                usage: format!("/{name}"),
+                description: command["description"].as_str().unwrap_or_default().into(),
+                options: options_of(&command),
+                public,
+            });
+        }
+        for sub in subs {
+            out.push(Listed {
+                usage: format!("/{name} {}", sub["name"].as_str().unwrap_or_default()),
+                description: sub["description"].as_str().unwrap_or_default().into(),
+                options: options_of(sub),
+                public,
+            });
+        }
+    }
+    out
 }
 
 pub fn all() -> Vec<Value> {
@@ -481,7 +579,7 @@ mod tests {
                 }
             }
         }
-        let commands = for_bot(&["scanline".to_owned()]);
+        let commands = for_bot(&[SCANLINE.to_owned()]);
         let mut names: Vec<&str> = commands
             .iter()
             .map(|c| c["name"].as_str().unwrap())
@@ -493,5 +591,16 @@ mod tests {
         let total = names.len();
         names.dedup();
         assert_eq!(names.len(), total, "duplicate command name");
+    }
+
+    #[test]
+    fn listing_splits_subcommands() {
+        let listed = listing(&[]);
+        assert!(listed.iter().any(|l| l.usage == "/role add" && !l.public));
+        assert!(listed.iter().any(|l| l.usage == "/rank" && l.public));
+        assert!(!listed.iter().any(|l| l.usage == "/role"));
+        assert!(!listed.iter().any(|l| l.usage == "/filters"));
+        let mute = listed.iter().find(|l| l.usage == "/mute").unwrap();
+        assert_eq!(mute.options, ["user", "duration", "reason?"]);
     }
 }

@@ -638,3 +638,23 @@ body.activity { display: grid; place-items: center; padding: 24px; }
 .confirm h2 { margin: 0 0 6px; font-size: 17px; color: var(--warn); }
 .confirm-list { margin: 12px 0 18px; padding-left: 18px; display: grid; gap: 8px; font-size: 14px; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* Card background previews. */
+.preview-pair { display: grid; gap: 10px; }
+
+/* Commands tab. */
+.commands { list-style: none; margin: 0; padding: 4px 0; }
+.commands li { padding: 12px 20px; border-top: 1px solid var(--border); }
+.commands li:first-child { border-top: 0; }
+.commands li p { margin: 4px 0 0; font-size: 13.5px; }
+.command-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.command-name { font: 600 14px/1.5 var(--mono); color: var(--text); }
+.command-option {
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font: 12px/1.6 var(--mono);
+  color: var(--text);
+}
+.command-option.optional { color: var(--muted); border-style: dashed; }
+.commands-hint { padding: 0 20px; margin: 0 0 4px; }

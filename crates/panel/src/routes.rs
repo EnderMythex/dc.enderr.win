@@ -8,6 +8,7 @@ use axum_extra::extract::cookie::CookieJar;
 use base64::Engine;
 use dc_core::{
     registry::{self, BotDef},
+    render,
     settings::BotSettings,
 };
 use futures_util::future::join_all;
@@ -296,6 +297,11 @@ pub async fn save_settings(
         }
     };
     let previous = BotSettings::load(&def.dir).unwrap_or_default();
+    // Saved by its own form (Card background).
+    let settings = BotSettings {
+        background_dim: previous.background_dim,
+        ..settings
+    };
     settings.save(&def.dir)?;
     tracing::info!(user = %session.user.id, bot = %def.slug, "settings saved");
     if previous != settings {
@@ -325,31 +331,6 @@ const MAX_BANNER_BYTES: usize = 4 * 1024 * 1024;
 /// Longest bio Discord accepts for an application.
 pub const MAX_BIO_CHARS: usize = 400;
 
-/// MIME type of an image, from its first bytes.
-fn image_type(bytes: &[u8]) -> Option<&'static str> {
-    match bytes {
-        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
-        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
-        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
-        [
-            b'R',
-            b'I',
-            b'F',
-            b'F',
-            _,
-            _,
-            _,
-            _,
-            b'W',
-            b'E',
-            b'B',
-            b'P',
-            ..,
-        ] => Some("image/webp"),
-        _ => None,
-    }
-}
-
 /// `data:` URI of an uploaded picture, or why it is refused.
 fn image_data(bytes: &[u8], max: usize, what: &str) -> Result<String, String> {
     if bytes.len() > max {
@@ -358,7 +339,7 @@ fn image_data(bytes: &[u8], max: usize, what: &str) -> Result<String, String> {
             max / 1024 / 1024
         ));
     }
-    let mime = image_type(bytes)
+    let mime = render::image_type(bytes)
         .ok_or_else(|| format!("The {what} must be a PNG, JPEG, GIF or WebP image."))?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok(format!("data:{mime};base64,{encoded}"))
@@ -551,6 +532,154 @@ fn too_large_or_bad() -> AppError {
     )
 }
 
+/// GET /bots/{slug}/commands — every slash command of the bot.
+pub async fn bot_commands(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+) -> Page {
+    let def = owned_bot(&state, &session, &slug).await?;
+    let commands = dc_core::commands::listing(&def.packs);
+    let bot = BotView::load(&state, def).await;
+    Ok(views::bot_commands(&session, &bot, &commands).into_response())
+}
+
+/// The bot's card background with its darkening, if it has one.
+pub fn background(def: &dc_core::registry::BotDef) -> Option<render::Background> {
+    let dim = BotSettings::load(&def.dir)
+        .map(|settings| settings.background_dim)
+        .unwrap_or(dc_core::settings::BACKGROUND_DIM);
+    render::Background::load(&def.dir, dim)
+}
+
+#[derive(Default)]
+struct BackgroundForm {
+    csrf: String,
+    picture: Vec<u8>,
+    remove: bool,
+    dim: Option<u8>,
+}
+
+/// POST /bots/{slug}/background — the picture behind the bot's cards.
+pub async fn save_background(
+    State(state): State<AppState>,
+    session: Session,
+    Path(slug): Path<String>,
+    mut multipart: Multipart,
+) -> Page {
+    let mut form = BackgroundForm::default();
+    let unreadable =
+        || AppError::BadRequest("The form could not be read. The picture must be 3 MB at most.");
+    while let Some(field) = multipart.next_field().await.map_err(|_| unreadable())? {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "picture" => form.picture = field.bytes().await.map_err(|_| unreadable())?.to_vec(),
+            "csrf" | "remove" | "dim" => {
+                let text = field.text().await.map_err(|_| unreadable())?;
+                match name.as_str() {
+                    "csrf" => form.csrf = text,
+                    "remove" => form.remove = true,
+                    _ => form.dim = text.trim().parse::<u8>().ok().map(|dim| dim.min(90)),
+                }
+            }
+            _ => {}
+        }
+    }
+    session.check_csrf(&form.csrf)?;
+    let def = owned_bot(&state, &session, &slug).await?;
+    let file = def.dir.join(render::BACKGROUND_FILE);
+    let mut done = Vec::new();
+
+    if !form.picture.is_empty() {
+        let problem = if form.picture.len() > render::BACKGROUND_MAX_BYTES {
+            Some("The picture is too large (3 MB at most).")
+        } else if render::image_type(&form.picture).is_none() {
+            Some("The picture must be a PNG, JPEG, GIF or WebP image.")
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            let settings = BotSettings::load(&def.dir)?;
+            let bio = match def.token() {
+                Some(token) => state.discord.bot_bio(&token).await,
+                None => None,
+            };
+            let bot = BotView::load(&state, def).await;
+            let page = views::bot_settings(
+                &session,
+                &bot,
+                &settings,
+                bio.as_deref(),
+                None,
+                Some(problem),
+            );
+            return Ok((StatusCode::UNPROCESSABLE_ENTITY, page).into_response());
+        }
+        let tmp = def.dir.join(format!(".{}.tmp", render::BACKGROUND_FILE));
+        std::fs::write(&tmp, &form.picture)?;
+        std::fs::rename(&tmp, &file)?;
+        done.push("picture changed".to_owned());
+    } else if form.remove && file.exists() {
+        std::fs::remove_file(&file)?;
+        done.push("picture removed".to_owned());
+    }
+    if let Some(dim) = form.dim {
+        let mut settings = BotSettings::load(&def.dir)?;
+        if settings.background_dim != dim {
+            settings.background_dim = dim;
+            settings.save(&def.dir)?;
+            done.push(format!("darkening → {dim} %"));
+        }
+    }
+    if !done.is_empty() {
+        tracing::info!(user = %session.user.id, bot = %def.slug, "card background updated");
+        let action = format!("Card background: {}", done.join(", "));
+        crate::audit::record(&state, &session, &def.slug, action).await;
+    }
+    Ok(Redirect::to(&format!("/bots/{}/settings?m=background", def.slug)).into_response())
+}
+
+/// GET /bots/{slug}/background/{image} — samples of the cards with the
+/// bot's background: `notice.png` (an error message) and `welcome.png`.
+pub async fn background_preview(
+    State(state): State<AppState>,
+    session: Session,
+    Path((slug, image)): Path<(String, String)>,
+) -> Page {
+    let def = owned_bot(&state, &session, &slug).await?;
+    let svg = match image.as_str() {
+        "notice.png" => dc_core::cards::banner(
+            dc_core::cards::Tone::Error,
+            &def.name,
+            "Something went wrong",
+            "Error messages, confirmations and notices look like this.",
+        ),
+        "welcome.png" => {
+            let user = &session.user;
+            let picture = state
+                .discord
+                .avatar_png(&user.id, user.avatar.as_deref())
+                .await;
+            render::welcome(
+                user.display_name(),
+                "Member #128 · Your server",
+                picture.as_deref(),
+            )
+        }
+        _ => return Err(AppError::NotFound),
+    };
+    let background = background(&def);
+    let png = tokio::task::spawn_blocking(move || render::png_with(&svg, background.as_ref()))
+        .await
+        .map_err(std::io::Error::other)?
+        .map_err(std::io::Error::other)?;
+    let headers = [
+        (header::CONTENT_TYPE, "image/png"),
+        (header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, png).into_response())
+}
+
 #[derive(Deserialize)]
 pub struct PowerForm {
     csrf: String,
@@ -606,7 +735,7 @@ mod tests {
                 .contains("too large")
         );
         let webp = *b"RIFF\0\0\0\0WEBPVP8 ";
-        assert_eq!(image_type(&webp), Some("image/webp"));
+        assert_eq!(render::image_type(&webp), Some("image/webp"));
     }
 
     #[test]

@@ -7,6 +7,8 @@ TO_ADD.md
 # Bot secrets and state: only the bot definitions go into the images.
 bots/*/.env
 bots/*/settings.json
+bots/*/background
+bots/*/.background.tmp
 bots/*/.settings.json.tmp
 bots/*/guilds
 bots/*/data

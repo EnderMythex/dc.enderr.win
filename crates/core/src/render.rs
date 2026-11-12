@@ -2,7 +2,11 @@
 //! SVG string rendered to PNG with resvg, using the bundled Inter font so the
 //! result is identical on every machine.
 
-use std::sync::LazyLock;
+use std::{
+    borrow::Cow,
+    path::Path,
+    sync::{Arc, LazyLock, RwLock},
+};
 
 use crate::{crypto::random_range, thousands};
 use base64::Engine;
@@ -32,10 +36,116 @@ pub enum RenderError {
 const CAPTCHA_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 pub const CAPTCHA_LENGTH: usize = 5;
 
-/// Renders an SVG document to PNG bytes. CPU-bound: call it from
-/// `spawn_blocking`.
+/// File of a bot folder holding the picture drawn behind its cards.
+pub const BACKGROUND_FILE: &str = "background";
+/// Largest background picture accepted.
+pub const BACKGROUND_MAX_BYTES: usize = 3 * 1024 * 1024;
+
+/// MIME type of a picture, from its first bytes.
+pub fn image_type(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => Some("image/webp"),
+        _ => None,
+    }
+}
+
+/// A picture drawn behind every card of a bot (notices, welcome, rank,
+/// leaderboard, settings), darkened so the text stays readable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Background {
+    href: String,
+    /// Darkening, 0 (none) to 90 (%).
+    dim: u8,
+}
+
+impl Background {
+    pub fn from_bytes(bytes: &[u8], dim: u8) -> Option<Self> {
+        if bytes.len() > BACKGROUND_MAX_BYTES {
+            return None;
+        }
+        let mime = image_type(bytes)?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Some(Self {
+            href: format!("data:{mime};base64,{encoded}"),
+            dim: dim.min(90),
+        })
+    }
+
+    /// The background of a bot folder, if it has one.
+    pub fn load(bot_dir: &Path, dim: u8) -> Option<Self> {
+        let bytes = std::fs::read(bot_dir.join(BACKGROUND_FILE)).ok()?;
+        Self::from_bytes(&bytes, dim)
+    }
+
+    fn draw(&self, width: u32, height: u32) -> String {
+        format!(
+            r##"<clipPath id="bg-clip"><rect width="{width}" height="{height}" rx="22"/></clipPath><g clip-path="url(#bg-clip)"><image href="{}" x="0" y="0" width="{width}" height="{height}" preserveAspectRatio="xMidYMid slice"/><rect width="{width}" height="{height}" fill="#050505" fill-opacity="{:.2}"/></g>"##,
+            self.href,
+            f32::from(self.dim) / 100.0
+        )
+    }
+}
+
+/// The background of the running bot (`png` uses it).
+static BACKGROUND: RwLock<Option<Arc<Background>>> = RwLock::new(None);
+
+/// Sets the background drawn by `png` in this process (the bot).
+pub fn set_background(background: Option<Background>) {
+    if let Ok(mut current) = BACKGROUND.write() {
+        *current = background.map(Arc::new);
+    }
+}
+
+/// Where `frame` leaves room for a background: `<!--background W H-->`.
+const SLOT: &str = "<!--background ";
+
+fn with_background<'a>(svg: &'a str, background: Option<&Background>) -> Cow<'a, str> {
+    let Some(start) = svg.find(SLOT) else {
+        return Cow::Borrowed(svg);
+    };
+    let Some(length) = svg[start..].find("-->") else {
+        return Cow::Borrowed(svg);
+    };
+    let end = start + length + 3;
+    let drawn = background
+        .and_then(|background| {
+            let mut size = svg[start + SLOT.len()..end - 3].split_whitespace();
+            let width = size.next()?.parse().ok()?;
+            let height = size.next()?.parse().ok()?;
+            Some(background.draw(width, height))
+        })
+        .unwrap_or_default();
+    Cow::Owned(format!("{}{drawn}{}", &svg[..start], &svg[end..]))
+}
+
+/// Renders an SVG document to PNG bytes, with the bot's background behind
+/// cards. CPU-bound: call it from `spawn_blocking`.
 pub fn png(svg: &str) -> Result<Vec<u8>, RenderError> {
-    let tree = usvg::Tree::from_str(svg, &OPTIONS)?;
+    let background = BACKGROUND.read().ok().and_then(|current| current.clone());
+    png_with(svg, background.as_deref())
+}
+
+/// Like `png`, with a given background (the panel draws for many bots).
+pub fn png_with(svg: &str, background: Option<&Background>) -> Result<Vec<u8>, RenderError> {
+    let svg = with_background(svg, background);
+    let tree = usvg::Tree::from_str(&svg, &OPTIONS)?;
     let size = tree.size().to_int_size();
     let mut pixmap =
         tiny_skia::Pixmap::new(size.width(), size.height()).ok_or(RenderError::Empty)?;
@@ -116,6 +226,7 @@ pub(crate) fn frame(width: u32, height: u32, body: &str) -> String {
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
 <defs><radialGradient id="glow" cx="50%" cy="0%" r="75%"><stop offset="0" stop-color="#ffffff" stop-opacity="0.09"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs>
 <rect width="{w}" height="{h}" rx="22" fill="#050505"/>
+<!--background {w} {h}-->
 <rect width="{w}" height="{h}" rx="22" fill="url(#glow)"/>
 <g stroke="#2a2a2a" stroke-width="1" stroke-dasharray="4 4">
 <line x1="28" y1="0" x2="28" y2="{h}"/><line x1="{r}" y1="0" x2="{r}" y2="{h}"/>
@@ -363,6 +474,23 @@ mod tests {
     use super::*;
 
     const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G'];
+
+    #[test]
+    fn backgrounds() {
+        // Any PNG will do as a picture: a captcha.
+        let picture = png(&captcha("ABCDE")).unwrap();
+        let background = Background::from_bytes(&picture, 60).unwrap();
+        assert!(Background::from_bytes(b"not a picture", 60).is_none());
+
+        let card = welcome("Ender", "Member #1", None);
+        let plain = with_background(&card, None);
+        assert!(!plain.contains("<image") && !plain.contains(SLOT));
+        let drawn = with_background(&card, Some(&background));
+        assert!(drawn.contains("data:image/png;base64,") && drawn.contains("0.60"));
+        let with = png_with(&card, Some(&background)).unwrap();
+        assert!(with.starts_with(PNG_MAGIC));
+        assert_ne!(with, png_with(&card, None).unwrap());
+    }
 
     #[test]
     fn cards_render_to_png() {

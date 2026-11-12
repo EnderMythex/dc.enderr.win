@@ -1,6 +1,7 @@
 //! Shared foundation for the panel and the bot.
 
 pub mod cards;
+pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod guild;

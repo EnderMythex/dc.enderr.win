@@ -8,6 +8,8 @@
 # Per-bot secrets and state written by the panel and the bot.
 /bots/*/.env
 /bots/*/settings.json
+/bots/*/background
+/bots/*/.background.tmp
 /bots/*/.settings.json.tmp
 /bots/*/guilds/
 /bots/*/data/

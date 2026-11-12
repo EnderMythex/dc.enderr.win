@@ -74,6 +74,7 @@ pub fn flash_text(code: &str) -> Option<&'static str> {
         "restarted" => "The bot is restarting.",
         "profile" => "Profile updated. Discord can take a minute to show it everywhere.",
         "reset" => "All settings of this server were reset.",
+        "background" => "Card background saved. The bot uses it within a few seconds.",
         _ => return None,
     })
 }
@@ -429,6 +430,7 @@ pub fn dashboard(
 enum Tab {
     Overview,
     Servers,
+    Commands,
     Logs,
     Settings,
 }
@@ -464,6 +466,7 @@ fn bot_page(
         nav.tabs aria-label="Bot sections" {
             (tab_link(Tab::Overview, base.clone(), "Overview"))
             (tab_link(Tab::Servers, format!("{base}/servers"), "Servers"))
+            (tab_link(Tab::Commands, format!("{base}/commands"), "Commands"))
             (tab_link(Tab::Logs, format!("{base}/logs"), "Logs"))
             (tab_link(Tab::Settings, format!("{base}/settings"), "Settings"))
         }
@@ -800,8 +803,91 @@ pub fn bot_settings(
                 button.btn.primary type="submit" { "Save" }
             }
         }
+        @let has_background = bot.def.dir.join(dc_core::render::BACKGROUND_FILE).is_file();
+        form.card.form method="post" enctype="multipart/form-data" data-track
+            action={ "/bots/" (bot.def.slug) "/background" } {
+            (csrf_field(session))
+            h2 { "Card background" }
+            p.muted {
+                "A picture drawn behind every image the bot sends: error and success messages, "
+                "welcome card, rank card, leaderboard, settings panel. Darkened so the text stays readable."
+            }
+            div.preview-pair {
+                img.dimg src={ "/bots/" (bot.def.slug) "/background/notice.png" } alt="Sample message" width="1000" height="266" loading="lazy";
+                img.dimg src={ "/bots/" (bot.def.slug) "/background/welcome.png" } alt="Sample welcome card" width="1000" height="360" loading="lazy";
+            }
+            div.field-row {
+                div.field {
+                    label for="picture" { "New picture" }
+                    input #picture type="file" name="picture" accept="image/png,image/jpeg,image/gif,image/webp";
+                    p.hint { "PNG, JPEG, GIF or WebP, 3 MB at most. Wide pictures fit best (about 1000 × 300); it is cropped to each card." }
+                }
+                div.field {
+                    label for="dim" { "Darkening (%)" }
+                    input #dim type="number" name="dim" min="0" max="90" step="5" value=(settings.background_dim);
+                    p.hint { "0: the picture as is. 50 to 70 keeps the text easy to read." }
+                }
+            }
+            @if has_background {
+                label.check {
+                    input type="checkbox" name="remove" value="on";
+                    span { "Remove the picture (back to the plain black cards)" }
+                }
+            }
+            div.form-actions {
+                button.btn.primary type="submit" { "Save background" }
+            }
+        }
     };
     bot_page(session, bot, Tab::Settings, flash, content)
+}
+
+/// Every slash command of the bot, with who can use it.
+pub fn bot_commands(
+    session: &Session,
+    bot: &BotView,
+    commands: &[dc_core::commands::Listed],
+) -> Markup {
+    let group = |public: bool| {
+        html! {
+            ul.commands {
+                @for command in commands.iter().filter(|c| c.public == public) {
+                    li {
+                        div.command-line {
+                            code.command-name { (command.usage) }
+                            @for option in &command.options {
+                                @if let Some(name) = option.strip_suffix('?') {
+                                    span.command-option.optional title="Optional" { (name) }
+                                } @else {
+                                    span.command-option title="Required" { (option) }
+                                }
+                            }
+                        }
+                        p.muted { (command.description) }
+                    }
+                }
+            }
+        }
+    };
+    let content = html! {
+        section.card.flush {
+            div.card-head { h2 { "Everyone" } }
+            (group(true))
+        }
+        section.card.flush {
+            div.card-head { h2 { "Bot admins" } }
+            p.hint.commands-hint {
+                "The server owner, members with the Administrator permission, the bot's owners and the "
+                "admins of the server's Admins section (or added with /ownerbot)."
+            }
+            (group(false))
+        }
+        p.hint {
+            "Type / in a channel of the server to use them. Options in grey are optional. "
+            "Moderation commands only work on members below the bot's role."
+        }
+    };
+    bot_page(session, bot, Tab::Commands, None, content)
 }
 
 // ---------------------------------------------------------------- server configuration

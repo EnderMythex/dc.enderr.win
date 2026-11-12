@@ -9,7 +9,6 @@ mod antiscam;
 mod api;
 mod app;
 mod assistant;
-mod commands;
 mod db;
 mod gemini;
 mod giveaway;
@@ -167,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
 /// by Discord: it must be sent back, or Discord refuses the whole update.
 async fn register_commands(app: &App) {
     let path = format!("/applications/{}/commands", app.app_id());
-    let mut list = commands::for_bot(&app.packs);
+    let mut list = dc_core::commands::for_bot(&app.packs);
     match app.api.get(&path).await {
         Ok(existing) => {
             let entry_points = existing.as_array().into_iter().flatten();

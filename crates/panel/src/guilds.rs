@@ -760,7 +760,9 @@ pub async fn preview(
         }
         _ => return Err(AppError::NotFound),
     };
-    let png = tokio::task::spawn_blocking(move || render::png(&svg))
+    // Drawn with the bot's card background, as the bot sends it.
+    let background = crate::routes::background(&def);
+    let png = tokio::task::spawn_blocking(move || render::png_with(&svg, background.as_ref()))
         .await
         .map_err(std::io::Error::other)?
         .map_err(std::io::Error::other)?;

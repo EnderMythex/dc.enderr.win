@@ -1,4 +1,5 @@
-//! Bot-wide settings (its Discord presence), stored in
+//! Bot-wide settings (its Discord presence, the darkening of its cards'
+//! background picture), stored in
 //! `bots/<slug>/settings.json` and applied live by the bot.
 
 use std::{fs, io, path::Path};
@@ -27,7 +28,12 @@ pub struct BotSettings {
     pub presence_status: String,
     pub activity_type: String,
     pub activity_text: String,
+    /// Darkening of the background picture of the cards (0 to 90 %).
+    pub background_dim: u8,
 }
+
+/// Default darkening of the background picture.
+pub const BACKGROUND_DIM: u8 = 55;
 
 impl Default for BotSettings {
     fn default() -> Self {
@@ -35,6 +41,7 @@ impl Default for BotSettings {
             presence_status: "online".into(),
             activity_type: "none".into(),
             activity_text: String::new(),
+            background_dim: BACKGROUND_DIM,
         }
     }
 }
@@ -72,6 +79,7 @@ impl BotSettings {
             presence_status: presence_status.to_owned(),
             activity_type: activity_type.to_owned(),
             activity_text: activity_text.to_owned(),
+            ..Self::default()
         })
     }
 
