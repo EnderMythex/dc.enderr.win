@@ -2,6 +2,7 @@ mod activity;
 mod audit;
 mod auth;
 mod bridge;
+mod changelog;
 mod config;
 mod discord;
 mod docker;
@@ -110,6 +111,8 @@ fn app(state: AppState) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/assets/app.css", get(routes::stylesheet))
         .route("/assets/app.js", get(routes::script))
+        .route("/assets/theme.js", get(routes::theme_script))
+        .route("/patch-notes", get(routes::patch_notes))
         .route("/sw.js", get(routes::service_worker))
         .route("/offline", get(routes::offline))
         .route("/legal", get(legal::notice))

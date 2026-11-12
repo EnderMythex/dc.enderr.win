@@ -672,7 +672,7 @@ fn leaves(prefix: &str, value: &Value, out: &mut Vec<(String, Value)>) {
                 let path = if prefix.is_empty() {
                     key.clone()
                 } else {
-                    format!("{prefix} · {key}")
+                    format!("{prefix}/{key}")
                 };
                 leaves(&path, inner, out);
             }
@@ -704,8 +704,9 @@ fn changes(
                 .map_or(Value::Null, |(_, v)| v.clone());
             if previous != value {
                 out.push(views::Change {
+                    key: format!("{section}/{path}"),
                     section: section_name(section),
-                    field: capitalized(&path),
+                    field: capitalized(&path.replace('/', " · ")),
                     before: shown(&previous, context),
                     after: shown(&value, context),
                 });
@@ -713,6 +714,28 @@ fn changes(
         }
     }
     out
+}
+
+/// The current settings with only the accepted changes of the import
+/// (`section/field/...` keys of the review).
+fn apply_accepted(
+    current: &GuildConfig,
+    imported: &GuildConfig,
+    accepted: &[String],
+) -> Result<GuildConfig, String> {
+    let mut result = serde_json::to_value(current).map_err(|e| e.to_string())?;
+    let imported = serde_json::to_value(imported).map_err(|e| e.to_string())?;
+    for key in accepted {
+        let pointer = format!("/{key}");
+        if let (Some(value), Some(slot)) =
+            (imported.pointer(&pointer), result.pointer_mut(&pointer))
+        {
+            *slot = value.clone();
+        }
+    }
+    let mut config: GuildConfig = serde_json::from_value(result).map_err(|e| e.to_string())?;
+    config.sanitize();
+    Ok(config)
 }
 
 /// Channel and role ids of the settings that do not exist on the server
@@ -752,10 +775,19 @@ pub async fn import(
         || AppError::BadRequest("The file could not be read. It must be 512 KB at most.");
     let (mut csrf, mut file, mut pasted) = (String::new(), String::new(), String::new());
     let mut confirmed = false;
+    let mut accepted: Vec<String> = Vec::new();
     while let Some(field) = form.next_field().await.map_err(|_| unreadable())? {
         let name = field.name().unwrap_or("").to_owned();
         if name == "confirm" {
             confirmed = true;
+            continue;
+        }
+        // A change ticked in the review.
+        if name == "accept" {
+            let key = field.text().await.map_err(|_| unreadable())?;
+            if accepted.len() < 5000 && key.len() < 200 {
+                accepted.push(key);
+            }
             continue;
         }
         if !matches!(name.as_str(), "csrf" | "file" | "json") {
@@ -791,7 +823,31 @@ pub async fn import(
                 );
                 return Ok(page.into_response());
             }
-            Ok((mut config, sections)) => {
+            Ok((imported, sections)) => {
+                let all = changes(&current, &imported, &sections, &context);
+                let picked: Vec<&views::Change> =
+                    all.iter().filter(|c| accepted.contains(&c.key)).collect();
+                if picked.is_empty() {
+                    state.notices.put(
+                        session.key(),
+                        Answer {
+                            ok: false,
+                            message: "No change was ticked: nothing was imported.".into(),
+                        },
+                    );
+                    let to = format!("/bots/{}/servers/{guild_id}/{BACKUP}", bot.def.slug);
+                    return Ok(Redirect::to(&to).into_response());
+                }
+                let keys: Vec<String> = picked.iter().map(|c| c.key.clone()).collect();
+                let mut config = apply_accepted(&current, &imported, &keys)
+                    .map_err(|_| AppError::BadRequest("The import could not be applied."))?;
+                let mut sections: Vec<String> = keys
+                    .iter()
+                    .filter_map(|k| k.split('/').next())
+                    .map(str::to_owned)
+                    .collect();
+                sections.dedup();
+                let skipped = all.len() - picked.len();
                 config.save(&bot.def.dir, &guild_id)?;
                 tracing::warn!(
                     user = %session.user.id, bot = %bot.def.slug, guild = %guild_id,
@@ -805,10 +861,13 @@ pub async fn import(
                 audit::record(&state, &session, &bot.def.slug, action).await;
                 let unknown = unknown_ids(&config, &context);
                 let mut message = format!(
-                    "Settings imported ({} section(s): {}).",
-                    sections.len(),
+                    "{} change(s) imported ({}).",
+                    picked.len(),
                     sections.join(", ")
                 );
+                if skipped > 0 {
+                    message.push_str(&format!(" {skipped} change(s) left out."));
+                }
                 if unknown > 0 {
                     message.push_str(&format!(
                         " {unknown} channel or role id(s) do not exist on this server: check the sections."
@@ -1075,7 +1134,8 @@ mod tests {
             channels: vec![],
             roles: vec![],
         };
-        let current = GuildConfig::default();
+        let mut current = GuildConfig::default();
+        current.sanitize();
         let (after, sections) = merge_import_test(
             &current,
             r#"{"twitch":{"enabled":true,"logins":["junkocry"]},"logs":{}}"#,
@@ -1095,6 +1155,12 @@ mod tests {
         );
         // An empty section changes nothing.
         assert!(!list.iter().any(|c| c.section == "Logs"));
+
+        // Only the ticked changes are applied.
+        let keys = vec!["twitch/logins".to_owned()];
+        let applied = apply_accepted(&current, &after, &keys).unwrap();
+        assert_eq!(applied.twitch.logins, vec!["junkocry"]);
+        assert!(!applied.twitch.enabled);
     }
 
     #[test]

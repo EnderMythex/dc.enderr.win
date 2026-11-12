@@ -41,6 +41,34 @@ static VERIFY_VERSION: LazyLock<String> = LazyLock::new(|| {
     dc_core::crypto::sha256_hex(&both)[..12].to_owned()
 });
 
+static THEME_SCRIPT: LazyLock<String> = LazyLock::new(|| {
+    let hash = dc_core::crypto::sha256_hex(include_str!("../assets/theme.js"));
+    format!("/assets/theme.js?v={}", &hash[..12])
+});
+
+const ICON_SUN: &str = r#"<svg class="sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>"#;
+const ICON_MOON: &str = r#"<svg class="moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>"#;
+
+/// Switches between the dark and the light theme (app.js).
+fn theme_toggle() -> Markup {
+    html! {
+        button.icon-btn.theme-toggle type="button" data-theme-toggle
+            title="Switch the theme" aria-label="Switch between the dark and the light theme" {
+            (PreEscaped(ICON_MOON)) (PreEscaped(ICON_SUN))
+        }
+    }
+}
+
+/// "Patch notes", with a dot until the newest notes were read (app.js).
+fn notes_link() -> Markup {
+    html! {
+        a.notes-link href="/patch-notes" data-notes=(crate::changelog::latest()) {
+            span.new-dot aria-hidden="true" {}
+            "Patch notes"
+        }
+    }
+}
+
 static SCRIPT: LazyLock<String> = LazyLock::new(|| {
     let hash = dc_core::crypto::sha256_hex(include_str!("../assets/app.js"));
     format!("/assets/app.js?v={}", &hash[..12])
@@ -49,7 +77,7 @@ const CDN: &str = "https://cdn.discordapp.com";
 
 // ---------------------------------------------------------------- icons
 
-const ICON_LOGO: &str = r#"<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor"/><path d="M7 8.5h10M7 12h10M7 15.5h6" stroke="black" stroke-width="1.8" stroke-linecap="round"/></svg>"#;
+const ICON_LOGO: &str = r#"<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect width="24" height="24" rx="6" fill="currentColor"/><path class="logo-lines" d="M7 8.5h10M7 12h10M7 15.5h6" stroke="black" stroke-width="1.8" stroke-linecap="round"/></svg>"#;
 const ICON_DISCORD: &str = r#"<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19.6 5.3A17.5 17.5 0 0 0 15.3 4l-.5 1.1a16.2 16.2 0 0 0-5.6 0L8.7 4a17.5 17.5 0 0 0-4.3 1.3C1.7 9.4.9 13.3 1.3 17.2a17.6 17.6 0 0 0 5.3 2.7l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12.5 12.5 0 0 0 11.4 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17.6 17.6 0 0 0 5.3-2.7c.5-4.5-.8-8.4-3.1-11.9ZM8.7 14.8c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg>"#;
 const ICON_PLAY: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>"#;
 const ICON_STOP: &str = r#"<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>"#;
@@ -175,9 +203,11 @@ fn document(title: &str, body_class: &str, body: Markup) -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                meta name="color-scheme" content="dark";
+                meta name="color-scheme" content="dark light";
                 meta name="robots" content="noindex";
                 title { (title) " · " (BRAND) }
+                // Before the stylesheet applies: no flash of the wrong theme.
+                script src=(THEME_SCRIPT.as_str()) {}
                 link rel="stylesheet" href=(STYLESHEET.as_str());
                 link rel="icon" type="image/svg+xml" href="/assets/favicon.svg";
                 script src=(SCRIPT.as_str()) defer {}
@@ -191,7 +221,9 @@ fn footer() -> Markup {
     html! {
         footer.foot {
             span { (BRAND) }
-            nav.foot-links aria-label="Legal" {
+            nav.foot-links aria-label="Links" {
+                a href="/patch-notes" { "Patch notes" }
+                button type="button" data-theme-toggle { "Switch the theme" }
                 a href="/legal" { "Legal notice" }
                 a href="/privacy" { "Privacy" }
                 a href="/terms" { "Terms" }
@@ -222,6 +254,42 @@ pub fn legal_page(title: &str, updated: &str, body: Markup) -> Markup {
     )
 }
 
+/// The patch notes of the panel and its bots.
+pub fn patch_notes() -> Markup {
+    let latest = crate::changelog::latest();
+    document(
+        "Patch notes",
+        "public",
+        html! {
+            div.frame {
+                div.band.legal-head {
+                    a.back href="/" { (icon(ICON_BACK)) "Back to " (BRAND) }
+                    p.eyebrow { "What's new" }
+                    h1 { "Patch notes" }
+                    p.muted { "The updates of the panel and of the bots." }
+                }
+                (rule())
+                main.band {
+                    div.notes data-notes-seen=(latest) {
+                        @for entry in crate::changelog::ENTRIES {
+                            article.note id=(entry.id) {
+                                div.note-head {
+                                    h2 { (entry.title) }
+                                    @if entry.id == latest { span.note-tag { "New" } }
+                                    span.note-date { (entry.date) }
+                                }
+                                ul { @for item in entry.items { li { (item) } } }
+                            }
+                        }
+                    }
+                }
+                (rule())
+                (footer())
+            }
+        },
+    )
+}
+
 /// Page of a logged-in user: top bar, a header band and a content band.
 fn app_page(
     title: &str,
@@ -241,6 +309,8 @@ fn app_page(
                     div.bar {
                         a.brand href="/dashboard" { (icon(ICON_LOGO)) span { (BRAND) } }
                         div.account {
+                            (notes_link())
+                            (theme_toggle())
                             @if session.is_admin { span.tag { "Admin" } }
                             img.avatar.sm src=(avatar_url(&user.id, user.avatar.as_deref()))
                                 alt="" width="28" height="28";
@@ -2136,6 +2206,8 @@ fn side_nav(base: &str, config: &GuildConfig, module: &str) -> Markup {
 
 /// One setting changed by an import.
 pub struct Change {
+    /// `section/field/...`: the value of the ticked box.
+    pub key: String,
     pub section: String,
     pub field: String,
     pub before: String,
@@ -2166,7 +2238,7 @@ pub fn import_review(
             } @else {
                 p.muted {
                     (changes.len()) " change(s) in " (sections.len()) " section(s). "
-                    "Nothing is saved until you confirm."
+                    "Untick what you do not want; nothing is saved until you confirm."
                 }
             }
             @if unknown > 0 {
@@ -2175,10 +2247,18 @@ pub fn import_review(
                 }
             }
             @for section in &sections {
-                div.review {
-                    h3 { (section) }
+                div.review data-review {
+                    div.review-head {
+                        h3 { (section) }
+                        label.check {
+                            input type="checkbox" data-review-all checked;
+                            span { "All" }
+                        }
+                    }
                     @for change in changes.iter().filter(|c| c.section == *section) {
-                        div.review-row {
+                        label.review-row.has-check {
+                            input type="checkbox" name="accept" value=(change.key) checked
+                                aria-label={ "Import " (change.field) };
                             span.review-field { (change.field) }
                             span.review-values {
                                 span.review-before { (change.before) }
@@ -2192,7 +2272,7 @@ pub fn import_review(
             div.form-actions {
                 a.btn href={ (base) "/" (BACKUP) } { "Cancel" }
                 @if !changes.is_empty() {
-                    button.btn.primary type="submit" { "Confirm the import" }
+                    button.btn.primary type="submit" { "Import the ticked changes" }
                 }
             }
         }

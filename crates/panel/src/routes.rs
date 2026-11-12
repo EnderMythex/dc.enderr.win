@@ -81,6 +81,20 @@ pub async fn script() -> impl IntoResponse {
     )
 }
 
+pub async fn theme_script() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=3600"),
+        ],
+        include_str!("../assets/theme.js"),
+    )
+}
+
+pub async fn patch_notes() -> impl IntoResponse {
+    views::patch_notes()
+}
+
 /// The service worker; served from the root so it covers every page.
 pub async fn service_worker() -> impl IntoResponse {
     (

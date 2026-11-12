@@ -182,6 +182,64 @@
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 
+  // ------------------------------------------------------------ previews
+
+  // Side color of the Discord previews (set from data-accent: no inline style).
+  document.querySelectorAll('[data-accent]').forEach((box) => {
+    if (/^#[0-9a-f]{6}$/.test(box.dataset.accent)) box.style.borderLeftColor = box.dataset.accent;
+  });
+
+  // ------------------------------------------------------------ theme
+
+  document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem('theme', next);
+      } catch {}
+    });
+  });
+
+  // ------------------------------------------------------------ patch notes
+
+  // A dot on the button until the newest notes were opened.
+  const seenNotes = document.querySelector('[data-notes-seen]');
+  try {
+    if (seenNotes) localStorage.setItem('notes-seen', seenNotes.dataset.notesSeen);
+    const seen = localStorage.getItem('notes-seen');
+    document.querySelectorAll('[data-notes]').forEach((link) => {
+      link.classList.toggle('unseen', link.dataset.notes !== seen);
+    });
+  } catch {}
+
+  // ------------------------------------------------------------ import review
+
+  document.querySelectorAll('[data-review]').forEach((section) => {
+    const all = section.querySelector('[data-review-all]');
+    const boxes = [...section.querySelectorAll('input[name="accept"]')];
+    const refresh = () => {
+      boxes.forEach((box) => box.closest('.review-row').classList.toggle('refused', !box.checked));
+      const ticked = boxes.filter((box) => box.checked).length;
+      all.checked = ticked === boxes.length;
+      all.indeterminate = ticked > 0 && ticked < boxes.length;
+    };
+    all.addEventListener('change', () => {
+      boxes.forEach((box) => { box.checked = all.checked; });
+      refresh();
+    });
+    boxes.forEach((box) => box.addEventListener('change', refresh));
+  });
+
+  // ------------------------------------------------------------ retry
+
+  // Discord asked to slow down: the error page reloads after a few seconds.
+  const retry = document.querySelector('[data-retry]');
+  if (retry) {
+    const seconds = Number(retry.dataset.retry) || 5;
+    setTimeout(() => location.reload(), seconds * 1000);
+  }
+
   // ------------------------------------------------------------ unsaved changes
 
   const tracked = [...document.querySelectorAll('form[data-track]')];
@@ -250,20 +308,4 @@
     void bar.offsetWidth;
     bar.classList.add('shake');
   });
-
-  // ------------------------------------------------------------ previews
-
-  // Side color of the Discord previews (set from data-accent: no inline style).
-  document.querySelectorAll('[data-accent]').forEach((box) => {
-    if (/^#[0-9a-f]{6}$/.test(box.dataset.accent)) box.style.borderLeftColor = box.dataset.accent;
-  });
-
-  // ------------------------------------------------------------ retry
-
-  // Discord asked to slow down: the error page reloads after a few seconds.
-  const retry = document.querySelector('[data-retry]');
-  if (retry) {
-    const seconds = Number(retry.dataset.retry) || 5;
-    setTimeout(() => location.reload(), seconds * 1000);
-  }
 })();
