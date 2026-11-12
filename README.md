@@ -208,7 +208,11 @@ into that volume at every start.
 4. On the Discord application of the login, add the redirect
    `https://dc.enderr.win/auth/callback` (OAuth2 → Redirects).
 5. **Deploy**. The first build compiles the whole workspace in release mode:
-   count a few minutes and about 2 GB of RAM on the server.
+   count about 3 minutes and 2 GB of RAM on the server. Later deploys reuse
+   Docker's build cache (about 1.1 GB, capped at 2.5 GB) and only compile the
+   code that changed: a few seconds of compilation. A `docker builder prune`
+   (Coolify's disk cleanup can run one) empties that cache; the next build
+   then takes the 3 minutes again.
 
 **Giving a client access to a bot**: add their Discord id to `owners` in
 `bots/<slug>/bot.toml` and push (Coolify redeploys), or put it in

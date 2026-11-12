@@ -32,6 +32,10 @@ toml = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
+# Tuned for fast deploys: no link-time optimization (minutes saved, the bots
+# do not need the last percent of speed) and incremental builds, kept in the
+# Docker build cache (see Dockerfile).
 [profile.release]
-lto = "thin"
+lto = false
+incremental = true
 strip = true
