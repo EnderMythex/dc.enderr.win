@@ -310,17 +310,25 @@ fn tiles(out: &mut String, top: u32, list: &[(String, String)]) {
     let width = (WIDTH - 144 - gap * (list.len() as u32 - 1)) / list.len() as u32;
     for (index, (label, value)) in list.iter().enumerate() {
         let x = 72 + (width + gap) * index as u32;
+        // Long values get a smaller font before being cut.
+        let room = (width - 44) as f32;
+        let size = if text_width(value, 30.0) <= room {
+            30.0
+        } else {
+            22.0
+        };
+        let max_chars = (room / (size * 0.6)) as usize;
         let _ = write!(
             out,
             r##"<rect x="{x}" y="{top}" width="{width}" height="96" rx="14" fill="#0d0d0d" fill-opacity="0.85" stroke="#2a2a2a"/>
 <text x="{}" y="{}" font-size="15" font-weight="600" fill="{MUTED}" letter-spacing="2">{}</text>
-<text x="{}" y="{}" font-size="30" font-weight="700" fill="{TEXT}">{}</text>"##,
+<text x="{}" y="{}" font-size="{size}" font-weight="700" fill="{TEXT}">{}</text>"##,
             x + 22,
             top + 34,
             fit_text(&label.to_uppercase(), 18),
             x + 22,
             top + 74,
-            fit_text(value, 14),
+            fit_text(value, max_chars),
         );
     }
 }

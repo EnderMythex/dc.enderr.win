@@ -1092,6 +1092,22 @@ fn has_secret(bot: &BotView, key: &str) -> bool {
     dc_core::registry::read_env(&bot.def.dir, key).is_some()
 }
 
+/// GitHub works without a token, but checks less often.
+fn github_token_hint(bot: &BotView) -> Markup {
+    let key = format!(
+        "GITHUB_TOKEN_{}",
+        bot.def.slug.to_uppercase().replace('-', "_")
+    );
+    html! {
+        @if !has_secret(bot, "GITHUB_TOKEN") {
+            div.notice role="status" {
+                "Without " code { (key) } " (a GitHub token with no permission) GitHub allows 60 requests per hour: "
+                "the bot then checks every 10 to 15 minutes instead of every 1 to 2."
+            }
+        }
+    }
+}
+
 fn missing_secret(what: &str, keys: &str) -> Markup {
     html! {
         div.notice.warn role="status" {
@@ -1357,6 +1373,90 @@ fn guild_fields(
                 (number_input("interval", "Every (hours)", "", reminders.interval_hours, 6, 336))
             }
         }
+        "releases" => {
+            let releases = &config.releases;
+            html! {
+                h2 { "Release announcements" }
+                (switch("enabled", "Announce new versions", "Each new GitHub release of the repository is posted with its notes, file sizes and download buttons. Checked every 2 minutes.", releases.enabled))
+                (github_token_hint(bot))
+                (field("repo", "Repository", "owner/name of a public repository, e.g. Misty-MC/Misty.", html! {
+                    input #repo type="text" name="repo" value=(releases.repo) maxlength="200" placeholder="owner/name";
+                }))
+                (channel_select("channel", "Announcement channel", "", text_channels(), &releases.channel))
+                (field("role", "Role mentioned", "Optional.", html! {
+                    select #role name="role" { (role_options(roles, releases.role.as_deref())) }
+                }))
+                (switch("prereleases", "Announce pre-releases too", "", releases.prereleases))
+                (field("download_url", "Download link", "Optional. The Download button; empty: the release page on GitHub. Also used by /download and the status panel.", html! {
+                    input #download_url type="url" name="download_url" value=(releases.download_url) maxlength="300" placeholder="https://";
+                }))
+                (field("website", "Website", "Optional. Shown by /download and the status panel.", html! {
+                    input #website type="url" name="website" value=(releases.website) maxlength="300" placeholder="https://";
+                }))
+                @if bot.def.packs.iter().any(|p| p == dc_core::commands::MISTY) {
+                    p.hint { "/release and /download show the latest version of this repository." }
+                }
+            }
+        }
+        "github" => {
+            let feed = &config.github;
+            let events = [
+                ("push", "Commits"),
+                ("pull_request", "Pull requests"),
+                ("issues", "Issues"),
+                ("star", "Stars"),
+                ("fork", "Forks"),
+                ("tag", "Tags and branches"),
+            ];
+            let items: Vec<(&str, String)> = events
+                .iter()
+                .map(|(id, label)| (*id, (*label).to_owned()))
+                .collect();
+            html! {
+                h2 { "GitHub activity" }
+                (switch("enabled", "Post the activity of repositories", "Commits, pull requests, issues, stars, forks and tags, with the author's picture. Checked every minute; the first check only records where each repository stands.", feed.enabled))
+                (github_token_hint(bot))
+                (channel_select("channel", "Channel", "", text_channels(), &feed.channel))
+                (textarea("repos", "Repositories", "Public repositories, one per line (10 at most): owner/name or their GitHub link.", &feed.repos.join("\n"), 4, 2000))
+                (checks("events", "What to post", "", &items, &feed.events))
+            }
+        }
+        "status" => {
+            let status = &config.status;
+            let sites: Vec<String> = status
+                .sites
+                .iter()
+                .map(|s| format!("{} | {}", s.name, s.url))
+                .collect();
+            html! {
+                h2 { "Status panel" }
+                (switch("enabled", "Keep a status panel up to date", "One message, edited every 5 minutes: each website up or down with its recent history, and the numbers below. Members can refresh it.", status.enabled))
+                (channel_select("channel", "Channel", "", text_channels(), &status.channel))
+                (textarea("sites", "Websites", "Up to 8, one per line: Name | https://address", &sites.join("\n"), 5, 3000))
+                (field("repo", "Repository for the numbers", "Optional: latest version, downloads and stars. Empty: the repository of the release announcements.", html! {
+                    input #repo type="text" name="repo" value=(status.repo) maxlength="200" placeholder="owner/name";
+                }))
+                (field("players_url", "Player count", "Optional: an address answering {\"players\": 123}.", html! {
+                    input #players_url type="url" name="players_url" value=(status.players_url) maxlength="300" placeholder="https://";
+                }))
+            }
+        }
+        "minecraft" => {
+            let minecraft = &config.minecraft;
+            html! {
+                h2 { "Minecraft server" }
+                (switch("enabled", "Show the Minecraft server", "Its state, players, version and ping (Java edition). A panel stays up to date in the channel below, refreshed every 5 minutes.", minecraft.enabled))
+                (field("address", "Server address", "play.example.com or 1.2.3.4:25565; SRV records are followed.", html! {
+                    input #address type="text" name="address" value=(minecraft.address) maxlength="120" placeholder="play.example.com";
+                }))
+                (field("name", "Name", "", html! {
+                    input #name type="text" name="name" value=(minecraft.name) maxlength="80" required;
+                }))
+                (textarea("description", "Description", "Optional, shown under the picture.", &minecraft.description, 3, 1800))
+                (switch("show_players", "Show the names of the players online", "Servers only give a few of them.", minecraft.show_players))
+                (channel_select("channel", "Panel channel", "Optional: without it, only /smp shows the server.", text_channels(), &minecraft.channel))
+            }
+        }
         _ => {
             let links = &config.lock_url;
             let scopes = [
@@ -1490,6 +1590,70 @@ fn guild_preview(
                 extra,
                 "Send now",
                 "Posts the reminder in its channels right away.",
+            )
+        }
+        "releases" => {
+            let releases = &config.releases;
+            let name = releases
+                .repo
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty())
+                .unwrap_or("Project");
+            let role = releases
+                .role
+                .as_deref()
+                .and_then(|id| context.roles.iter().find(|r| r.id == id));
+            let blocks = html! {
+                p.dtitle { (name) " v1.2.0" }
+                p.dsmall { "New version" }
+                @if let Some(role) = role { p.dtext { span.dmention { "@" (role.name) } } }
+                p.dtext { "The notes of the release, as written on GitHub." }
+                p.dsmall { "Setup.exe 9.0 MB · Portable.zip 10.0 MB" }
+                div.dbtns { span.dbtn { "Download ↗" } span.dbtn { "Release notes ↗" } }
+            };
+            (
+                blocks,
+                html! {},
+                "Send the latest",
+                "Posts the latest release of the repository in the channel (without mentioning the role).",
+            )
+        }
+        "github" => {
+            let repo = config
+                .github
+                .repos
+                .first()
+                .map_or("owner/name", String::as_str);
+            let blocks = html! {
+                p.dsmall { (repo) " · just now" }
+                p.dtext { strong { "octocat" } " pushed " strong { "2" } " commits to " code { "main" } }
+                p.dtext { code { "2222222" } " Fix the launcher update\n" code { "1111111" } " Add a setting" }
+                span.dbtn { "View on GitHub ↗" }
+            };
+            (
+                blocks,
+                html! {},
+                "Send a sample",
+                "Posts the latest commit of the first repository as a sample.",
+            )
+        }
+        "status" | "minecraft" => {
+            let blocks = html! {
+                p.dtext {
+                    @if module == "status" {
+                        "A picture with each website (green: up, amber: slow, red: down) and its last checks, then the latest version, downloads, players and stars."
+                    } @else {
+                        "A picture with the server's icon, name, address, state, message of the day, players, version and ping, then the players online."
+                    }
+                }
+                span.dbtn { "Refresh" }
+            };
+            (
+                blocks,
+                html! {},
+                "Post the panel",
+                "Checks right away and posts the panel in its channel (the previous one is deleted).",
             )
         }
         "twitch" => {
@@ -1791,6 +1955,10 @@ fn section_on(config: &GuildConfig, id: &str) -> Option<bool> {
         "assistant" => config.assistant.enabled,
         "twitch" => config.twitch.enabled,
         "reminders" => config.reminders.enabled,
+        "releases" => config.releases.enabled,
+        "github" => config.github.enabled,
+        "status" => config.status.enabled,
+        "minecraft" => config.minecraft.enabled,
         _ => return None,
     })
 }
@@ -1803,7 +1971,11 @@ const NAV_GROUPS: &[(&str, &[&str])] = &[
         &["welcome", "rules", "verification", "roles", "levels"],
     ),
     ("Protection", &["links", "security", "reminders"]),
-    ("Community", &["tickets", "assistant", "twitch"]),
+    ("Community", &["tickets", "assistant"]),
+    (
+        "Integrations",
+        &["twitch", "releases", "github", "status", "minecraft"],
+    ),
 ];
 
 fn section_icon(id: &str) -> &'static str {
@@ -1830,6 +2002,14 @@ fn section_icon(id: &str) -> &'static str {
             r#"<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>"#
         }
         "backup" => r#"<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>"#,
+        "releases" => r#"<path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/>"#,
+        "github" => {
+            r#"<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11 6"/>"#
+        }
+        "status" => r#"<path d="M3 12h4l3-7 4 14 3-7h4"/>"#,
+        "minecraft" => {
+            r#"<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h3v3H8zM13 9h3v3h-3zM10 13h4v4h-4z"/>"#
+        }
         _ => r#"<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>"#,
     }
 }

@@ -22,7 +22,7 @@ use crate::{
 const POLL_INTERVAL: Duration = Duration::from_secs(4);
 
 /// Makes one panel of a server match what the configuration asks for.
-async fn sync_one(app: &App, guild_id: &str, kind: &str, wanted: Option<(String, Msg)>) {
+pub async fn sync_one(app: &App, guild_id: &str, kind: &str, wanted: Option<(String, Msg)>) {
     let existing = match db::get_panel(&app.db, guild_id, kind).await {
         Ok(existing) => existing,
         Err(error) => return tracing::error!(%error, "reading a panel failed"),
@@ -118,6 +118,9 @@ pub async fn sync(app: &App, guild_id: &str) {
         .filter(|_| config.role_panel.enabled && !config.role_panel.buttons.is_empty())
         .map(|channel| (channel, rolepanel::panel(&config)));
     sync_one(app, guild_id, "roles", role_panel).await;
+
+    // The status and Minecraft panels (checked over the network).
+    crate::uptime::refresh(app, guild_id, false).await;
 }
 
 /// Deletes a panel and posts it again at the bottom of its channel.

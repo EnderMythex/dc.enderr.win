@@ -318,6 +318,11 @@ async fn command(ctx: &Ctx) {
         {
             return scanline::command(ctx, name).await;
         }
+        "status" | "release" | "download" | "smp"
+            if ctx.app.packs.iter().any(|pack| pack == crate::misty::PACK) =>
+        {
+            return crate::misty::command(ctx, name).await;
+        }
         _ => {}
     }
 
@@ -376,6 +381,9 @@ async fn component(ctx: &Ctx) {
     }
     if id.starts_with(antiscam::UNBAN_PREFIX) {
         return antiscam::unban(ctx).await;
+    }
+    if id == crate::uptime::REFRESH || id == crate::minecraft::REFRESH {
+        return crate::misty::refresh(ctx).await;
     }
     match id {
         // `verify-start`: the panel of the former Scanline bot.

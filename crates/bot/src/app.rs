@@ -43,6 +43,13 @@ pub struct App {
     pub pending_links: Mutex<HashMap<String, crate::linkguard::Pending>>,
     /// Last SOL price, for the activity.
     pub sol_price: Mutex<Option<f64>>,
+    /// GitHub client (`GITHUB_TOKEN` optional).
+    pub github: Arc<crate::github::GitHub>,
+    /// What the GitHub feeds and the status panel already saw.
+    pub watch: crate::watch::Store,
+    pub pinger: crate::minecraft::Pinger,
+    /// Last answer of each website of the status panels.
+    pub site_checks: crate::uptime::Checks,
     /// Link to this bot's page on the dashboard, when configured.
     pub dashboard_url: Option<String>,
     /// Bot user id and application id, known once connected.
@@ -151,6 +158,11 @@ impl App {
     ) -> Self {
         let web = reqwest::Client::new();
         let gemini = crate::gemini::Gemini::from_env(web.clone(), &dir);
+        let github = crate::github::GitHub::new(
+            web.clone(),
+            dc_core::registry::read_env(&dir, "GITHUB_TOKEN"),
+        );
+        let watch = crate::watch::Store::open(&dir);
         Self {
             api,
             web,
@@ -166,6 +178,10 @@ impl App {
             assistant_queue: tokio::sync::Mutex::new(()),
             pending_links: Mutex::default(),
             sol_price: Mutex::default(),
+            github,
+            watch,
+            pinger: Default::default(),
+            site_checks: Mutex::default(),
             dashboard_url,
             identity: OnceLock::new(),
             gateway: Mutex::default(),

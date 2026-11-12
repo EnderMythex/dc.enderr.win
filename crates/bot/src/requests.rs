@@ -138,6 +138,68 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
             };
             (channel, logs::sample())
         }
+        "releases" => {
+            let settings = &config.releases;
+            let Some(channel) = settings.channel.clone() else {
+                return missing("an announcement channel");
+            };
+            let Some(repo) = crate::ghfeed::release_repo(settings) else {
+                return missing("a repository");
+            };
+            let releases = app
+                .github
+                .releases(repo)
+                .await
+                .map_err(|error| format!("GitHub: {error}"))?;
+            let Some(latest) = crate::github::latest(&releases) else {
+                return Err(format!("{repo} has no release yet."));
+            };
+            (
+                channel,
+                marked(crate::ghfeed::release_card(settings, repo, latest, false)),
+            )
+        }
+        "github" => {
+            let feed = &config.github;
+            let Some(channel) = feed.channel.clone() else {
+                return missing("a channel");
+            };
+            let Some(repo) = feed.repos.first() else {
+                return missing("a repository");
+            };
+            (channel, marked(crate::ghfeed::sample(app, repo).await?))
+        }
+        "status" | "minecraft" => {
+            let panel = if module == "status" {
+                crate::uptime::status_panel(app, guild_id, false).await
+            } else {
+                crate::uptime::server_panel(app, guild_id).await
+            };
+            let Some((channel, msg)) = panel else {
+                return Err(
+                    "Turn it on, choose its channel (and the server address) and save first."
+                        .into(),
+                );
+            };
+            if let Ok(Some(old)) = db::get_panel(&app.db, guild_id, module).await {
+                let _ = app
+                    .api
+                    .delete_message(&old.channel_id, &old.message_id)
+                    .await;
+                let _ = db::delete_panel(&app.db, guild_id, module).await;
+            }
+            panels::sync_one(app, guild_id, module, Some((channel.clone(), msg))).await;
+            return match db::get_panel(&app.db, guild_id, module).await {
+                Ok(Some(_)) => Ok(format!(
+                    "Panel posted in {}.",
+                    channel_label(app, guild_id, &channel)
+                )),
+                _ => Err(format!(
+                    "The panel could not be posted in {}. Check that the bot can see the channel and send messages there.",
+                    channel_label(app, guild_id, &channel)
+                )),
+            };
+        }
         "twitch" => {
             let twitch = &config.twitch;
             let Some(channel) = twitch.channel.clone() else {

@@ -46,6 +46,11 @@ services:
       GEMINI_API_KEY_SCANLINE: ${GEMINI_API_KEY_SCANLINE:-}
       TWITCH_CLIENT_ID_SCANLINE: ${TWITCH_CLIENT_ID_SCANLINE:-}
       TWITCH_CLIENT_SECRET_SCANLINE: ${TWITCH_CLIENT_SECRET_SCANLINE:-}
+      DISCORD_TOKEN_MISTY: ${DISCORD_TOKEN_MISTY:?}
+      DISCORD_CLIENT_SECRET_MISTY: ${DISCORD_CLIENT_SECRET_MISTY:-}
+      OWNERS_MISTY: ${OWNERS_MISTY:-}
+      # Only read to tell the dashboard whether the GitHub token is set.
+      GITHUB_TOKEN_MISTY: ${GITHUB_TOKEN_MISTY:-}
     # Lets the non-root panel user use the Docker socket, to start, stop and
     # read the logs of the bots. Value: `stat -c %g /var/run/docker.sock`.
     group_add:
@@ -120,6 +125,29 @@ services:
       DASHBOARD_URL: ${PUBLIC_URL:-https://dc.enderr.win}/bots/scanline
     labels:
       win.enderr.dc.bot: scanline
+    volumes:
+      - bots:/bots
+
+  bot-misty:
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    depends_on:
+      - panel
+    environment:
+      BOT_SLUG: misty
+      BOT_CONFIG_DIR: /bots/misty
+      BOTS_SEED_DIR: /opt/dc/bots
+      DISCORD_TOKEN: ${DISCORD_TOKEN_MISTY:?}
+      DISCORD_CLIENT_SECRET_MISTY: ${DISCORD_CLIENT_SECRET_MISTY:-}
+      OWNERS_MISTY: ${OWNERS_MISTY:-}
+      # GitHub token with no permission: 5,000 requests per hour instead of 60
+      # (https://github.com/settings/personal-access-tokens).
+      GITHUB_TOKEN_MISTY: ${GITHUB_TOKEN_MISTY:-}
+      DASHBOARD_URL: ${PUBLIC_URL:-https://dc.enderr.win}/bots/misty
+    labels:
+      win.enderr.dc.bot: misty
     volumes:
       - bots:/bots
 

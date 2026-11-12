@@ -44,6 +44,10 @@ pub const MODULES: &[(&str, &str)] = &[
     ("assistant", "AI assistant"),
     ("twitch", "Twitch"),
     ("reminders", "Safety reminders"),
+    ("releases", "Releases"),
+    ("github", "GitHub activity"),
+    ("status", "Status panel"),
+    ("minecraft", "Minecraft server"),
 ];
 
 fn module_label(module: &str) -> &str {
@@ -69,6 +73,10 @@ const TESTABLE: &[&str] = &[
     "roles",
     "reminders",
     "twitch",
+    "releases",
+    "github",
+    "status",
+    "minecraft",
 ];
 
 /// Checks access and loads everything a server page needs. 404 when the bot
@@ -134,6 +142,18 @@ pub async fn module(
 #[serde(default)]
 pub struct GuildForm {
     csrf: String,
+    repo: String,
+    prereleases: Option<String>,
+    download_url: String,
+    website: String,
+    repos: String,
+    events: Vec<String>,
+    sites: String,
+    players_url: String,
+    address: String,
+    name: String,
+    description: String,
+    show_players: Option<String>,
     enabled: Option<String>,
     users: String,
     roles: Vec<String>,
@@ -354,6 +374,41 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.reminders.channel_en = optional(form.channel_en);
             config.reminders.interval_hours = number(&form.interval, 48);
         }
+        "releases" => {
+            let releases = &mut config.releases;
+            releases.enabled = enabled;
+            releases.channel = optional(form.channel);
+            releases.role = optional(form.role);
+            releases.repo = form.repo;
+            releases.prereleases = form.prereleases.is_some();
+            releases.download_url = form.download_url;
+            releases.website = form.website;
+        }
+        "github" => {
+            config.github.enabled = enabled;
+            config.github.channel = optional(form.channel);
+            config.github.repos = words(&form.repos);
+            config.github.events = form.events;
+        }
+        "status" => {
+            config.status.enabled = enabled;
+            config.status.channel = optional(form.channel);
+            config.status.sites = lines(&form.sites)
+                .iter()
+                .filter_map(|line| dc_core::guild::parse_status_site(line))
+                .collect();
+            config.status.repo = form.repo;
+            config.status.players_url = form.players_url;
+        }
+        "minecraft" => {
+            let minecraft = &mut config.minecraft;
+            minecraft.enabled = enabled;
+            minecraft.channel = optional(form.channel);
+            minecraft.address = form.address;
+            minecraft.name = form.name;
+            minecraft.description = form.description;
+            minecraft.show_players = form.show_players.is_some();
+        }
         _ => {}
     }
 }
@@ -471,9 +526,18 @@ pub async fn export(
 
 /// The settings inside an imported file: an exported file, or the bare
 /// settings object. Only the sections present replace the current ones.
-fn merge_import(current: &GuildConfig, raw: &str) -> Result<(GuildConfig, Vec<String>), String> {
+fn merge_import(
+    current: &GuildConfig,
+    raw: &str,
+    guild_id: &str,
+) -> Result<(GuildConfig, Vec<String>), String> {
     let parsed: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
         .map_err(|error| format!("This is not a valid JSON file ({error})."))?;
+    // The data/state.json of the former Misty bot.
+    if dc_core::misty::is_state(&parsed) {
+        let (sections, _) = dc_core::misty::sections(&parsed, guild_id)?;
+        return merge_import(current, &Value::Object(sections).to_string(), guild_id);
+    }
     let settings = match parsed.get("format") {
         Some(format) if format != EXPORT_FORMAT => {
             return Err("This file is not a server settings file of this panel.".into());
@@ -564,7 +628,7 @@ pub async fn import(
             message: "Choose a file or paste the settings first.".into(),
         }
     } else {
-        match merge_import(&current, &raw) {
+        match merge_import(&current, &raw, &guild_id) {
             Ok((mut config, sections)) => {
                 config.save(&bot.def.dir, &guild_id)?;
                 tracing::warn!(
@@ -797,6 +861,73 @@ mod tests {
         assert_eq!(config.admins.roles, vec![ROLE]);
     }
 
+    fn merge_import_test(
+        current: &GuildConfig,
+        raw: &str,
+    ) -> Result<(GuildConfig, Vec<String>), String> {
+        merge_import(current, raw, "175928847299117063")
+    }
+
+    #[test]
+    fn misty_state_imports() {
+        let state = serde_json::json!({
+            "guilds": { "1474887049726267434": {
+                "releases": { "enabled": true, "channel": 1474887049726267001_u64 },
+                "smp": { "enabled": true, "address": "play.misty.fr" }
+            } },
+            "cursors": {}
+        });
+        let (config, sections) =
+            merge_import_test(&GuildConfig::default(), &state.to_string()).unwrap();
+        assert!(
+            sections.contains(&"releases".to_owned()) && sections.contains(&"minecraft".to_owned())
+        );
+        assert_eq!(
+            config.releases.channel.as_deref(),
+            Some("1474887049726267001")
+        );
+        assert_eq!(config.releases.repo, "Misty-MC/Misty");
+        assert_eq!(config.minecraft.address, "play.misty.fr");
+    }
+
+    #[test]
+    fn integration_forms() {
+        let config = saved(
+            "github",
+            GuildForm {
+                enabled: Some("on".into()),
+                channel: CHANNEL.into(),
+                repos: "Misty-MC/Misty, https://github.com/Misty-MC/Misty-Web\nbad".into(),
+                events: vec!["push".into(), "star".into(), "nope".into()],
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            config.github.repos,
+            vec!["Misty-MC/Misty", "Misty-MC/Misty-Web"]
+        );
+        assert_eq!(config.github.events, vec!["push", "star"]);
+        let config = saved(
+            "status",
+            GuildForm {
+                sites: "Site | https://misty-launcher.online/\nAPI = https://misty-launcher.online/api/latest\nbroken".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.status.sites.len(), 2);
+        let config = saved(
+            "minecraft",
+            GuildForm {
+                enabled: Some("on".into()),
+                address: "play.misty.fr".into(),
+                name: "".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(config.minecraft.name, "Minecraft server");
+        assert!(!config.minecraft.show_players);
+    }
+
     #[test]
     fn import_merges_sections() {
         let mut current = GuildConfig::default();
@@ -806,20 +937,26 @@ mod tests {
             "settings": { "twitch": { "enabled": true, "logins": ["JunkoCry"] }, "nonsense": { "x": 1 } }
         })
         .to_string();
-        let (config, sections) = merge_import(&current, &exported).unwrap();
+        let (config, sections) = merge_import_test(&current, &exported).unwrap();
         assert_eq!(sections, vec!["twitch"]);
         assert!(config.twitch.enabled && config.logs.enabled);
         assert_eq!(config.twitch.logins, vec!["junkocry"]);
 
         let bare = r#"{"anti_scam":{"invites":true}}"#;
-        assert!(merge_import(&current, bare).unwrap().0.anti_scam.invites);
-        assert!(merge_import(&current, "nope").is_err());
-        assert!(merge_import(&current, r#"{"format":"other","settings":{}}"#).is_err());
-        assert!(merge_import(&current, r#"{"twitch":{"enabled":"yes"}}"#).is_err());
-        assert!(merge_import(&current, r#"{"x":{}}"#).is_err());
+        assert!(
+            merge_import_test(&current, bare)
+                .unwrap()
+                .0
+                .anti_scam
+                .invites
+        );
+        assert!(merge_import_test(&current, "nope").is_err());
+        assert!(merge_import_test(&current, r#"{"format":"other","settings":{}}"#).is_err());
+        assert!(merge_import_test(&current, r#"{"twitch":{"enabled":"yes"}}"#).is_err());
+        assert!(merge_import_test(&current, r#"{"x":{}}"#).is_err());
 
         let shipped = include_str!("../../../bots/scanline/import/scanline-settings.json");
-        let (config, sections) = merge_import(&GuildConfig::default(), shipped).unwrap();
+        let (config, sections) = merge_import_test(&GuildConfig::default(), shipped).unwrap();
         assert!(sections.len() >= 8);
         assert!(config.anti_scam.insider && config.role_panel.buttons.len() == 5);
         assert!(config.rules.verifying() && config.rules.verify_channel.is_none());

@@ -79,6 +79,10 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Twitch alerts | — | Twitch: streamers, channel, role (needs `TWITCH_CLIENT_ID_<SLUG>` and `TWITCH_CLIENT_SECRET_<SLUG>`) |
 | Safety reminders | — | Safety reminders: French and English channels, interval |
 | Members | `/stats` `/missing-role` | — |
+| Release announcements | `/release` `/download` (misty pack) | Releases: repository, channel, role, pre-releases, download and website links |
+| GitHub activity | — | GitHub activity: repositories, channel, commits / pull requests / issues / stars / forks / tags |
+| Status panel | `/status` (misty pack) | Status panel: websites (up, slow, down, with history), version, downloads, players, stars |
+| Minecraft server | `/smp` (misty pack) | Minecraft server: address (SRV records followed), name, description, players, panel channel |
 | Settings panel | `/settings view`: image of the configuration, a menu per module, buttons and pickers to change it; `/help` | Everything |
 
 **Who is an admin?** Moderation and settings commands are reserved to: the
@@ -147,6 +151,18 @@ The former Scanline bot's settings (channels, roles, welcome DM, link lock,
 role panel, Twitch, reminders) are in `bots/scanline/import/scanline-settings.json`:
 import it in the server's *Backup* section. Panels posted by the former bot
 (Verify and role buttons) keep working.
+
+The `misty` pack (bot Misty Bot) adds `/status`, `/release`, `/download` and
+`/smp`. Releases, GitHub activity, the status panel and the Minecraft server
+are sections every bot has; GitHub needs no token, but `GITHUB_TOKEN_<SLUG>`
+(a token without any permission) lets the bot check every minute instead of
+every 10 to 15. The former Misty bot's `data/state.json` can be imported as is
+in a server's *Backup* section: its sections are converted, with Misty's
+repository, website and status pages filled in.
+
+A bot folder may hold a `background.png`: it becomes the picture behind the
+bot's cards until another one is chosen in Settings (Misty Bot ships the night
+landscape of the Misty website).
 
 ## Adding a bot
 

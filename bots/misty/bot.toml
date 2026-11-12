@@ -1,0 +1,11 @@
+# Misty Bot — every common feature, plus the Misty pack: GitHub release
+# announcements, GitHub activity, a live status panel and a Minecraft server
+# (/status, /release, /download, /smp). Set up on the dashboard.
+
+name = "Misty Bot"
+description = "The bot of Misty, the Minecraft launcher: releases, GitHub activity, status panel and Minecraft server, with every common feature."
+
+# Discord user ids allowed to manage this bot from the panel.
+owners = []
+
+packs = ["misty"]

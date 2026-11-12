@@ -11,6 +11,8 @@ mod app;
 mod assistant;
 mod db;
 mod gemini;
+mod ghfeed;
+mod github;
 mod giveaway;
 mod interactions;
 mod lang;
@@ -18,6 +20,8 @@ mod linkguard;
 mod logs;
 mod massrole;
 mod members;
+mod minecraft;
+mod misty;
 mod moderation;
 mod panels;
 mod reminders;
@@ -29,7 +33,9 @@ mod sol;
 mod tickets;
 mod twitch;
 mod ui;
+mod uptime;
 mod verify;
+mod watch;
 mod welcome;
 mod xp;
 
@@ -110,6 +116,9 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(twitch::watch(app.clone()));
     tokio::spawn(reminders::watch(app.clone()));
     tokio::spawn(sol::watch(app.clone()));
+    tokio::spawn(ghfeed::watch_releases(app.clone()));
+    tokio::spawn(ghfeed::watch_activity(app.clone()));
+    tokio::spawn(uptime::watch(app.clone()));
 
     // Privileged intents must be enabled on the Developer Portal. Without
     // them Discord closes the connection: fall back to what is allowed.
