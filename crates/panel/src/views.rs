@@ -1793,7 +1793,7 @@ fn guild_preview(
                 @if !todo.text.is_empty() { p.dtext { (todo.text) } }
                 div.dsplit {
                     p.dtext {
-                        strong { "#1 · Module Pizza Feature On Misty Bot" }
+                        strong { "#1 · Module Pizza Feature On Mistly Bot" }
                         "\n"
                         span.dsmall { "Open · added by @" (me) " just now" }
                     }

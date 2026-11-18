@@ -31,7 +31,7 @@
       "moderation": false
     },
     "minecraft": {
-      "address": "play.misty-launcher.online",
+      "address": "play.mistly.cc",
       "channel": "1569127383645163682",
       "description": "",
       "enabled": true,
@@ -40,7 +40,7 @@
     },
     "releases": {
       "channel": "1569060685948784771",
-      "download_url": "https://misty-launcher.online/download/setup",
+      "download_url": "https://mistly.cc/download/setup",
       "enabled": true,
       "look": {
         "banner": false,
@@ -51,7 +51,7 @@
       "prereleases": true,
       "repo": "Misty-MC/Misty",
       "role": "1569058292603424769",
-      "website": "https://misty-launcher.online/"
+      "website": "https://mistly.cc/"
     },
     "rules": {
       "captcha_style": "text",
@@ -87,19 +87,19 @@
       "sites": [
         {
           "name": "Site",
-          "url": "https://misty-launcher.online/"
+          "url": "https://mistly.cc/"
         },
         {
           "name": "API",
-          "url": "https://misty-launcher.online/api/latest"
+          "url": "https://mistly.cc/api/latest"
         },
         {
           "name": "Docs",
-          "url": "https://misty-launcher.online/docs"
+          "url": "https://mistly.cc/docs"
         },
         {
           "name": "Shop",
-          "url": "https://misty-launcher.online/shop"
+          "url": "https://mistly.cc/shop"
         }
       ]
     },

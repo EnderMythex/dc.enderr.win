@@ -6,6 +6,36 @@ use crate::{ghfeed, github, interactions::Ctx, minecraft, ui::Msg, uptime};
 
 pub const PACK: &str = dc_core::commands::MISTY;
 
+/// Misty became Mistly: the saved settings of every server point to the new
+/// website (links, status panel, download address). Runs at startup; does
+/// nothing once done.
+pub fn move_to_new_site(bot_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(bot_dir.join(dc_core::guild::DIR_NAME)) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(updated) = dc_core::misty::with_new_site(&raw) else {
+            continue;
+        };
+        let tmp = path.with_extension("json.site.tmp");
+        let written = std::fs::write(&tmp, updated).and_then(|()| std::fs::rename(&tmp, &path));
+        match written {
+            Ok(()) => {
+                tracing::info!(file = %path.display(), "settings moved to {}", dc_core::misty::HOST)
+            }
+            Err(error) => {
+                tracing::warn!(%error, file = %path.display(), "settings not moved to the new website")
+            }
+        }
+    }
+}
+
 pub async fn command(ctx: &Ctx, name: &str) {
     ctx.defer(true).await;
     let config = ctx.config();

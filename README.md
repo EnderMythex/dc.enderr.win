@@ -153,17 +153,19 @@ role panel, Twitch, reminders) are in `bots/scanline/import/scanline-settings.js
 import it in the server's *Backup* section. Panels posted by the former bot
 (Verify and role buttons) keep working.
 
-The `misty` pack (bot Misty Bot) adds `/status`, `/release`, `/download` and
+The `misty` pack (bot Mistly Bot, folder `bots/misty`, formerly Misty Bot) adds `/status`, `/release`, `/download` and
 `/smp`. Releases, GitHub activity, the status panel and the Minecraft server
 are sections every bot has; GitHub needs no token, but `GITHUB_TOKEN_<SLUG>`
 (a token without any permission) lets the bot check every minute instead of
 every 10 to 15. The former Misty bot's `data/state.json` can be imported as is
 in a server's *Backup* section: its sections are converted, with Misty's
-repository, website and status pages filled in.
+repository, website (now <https://mistly.cc>) and status pages filled in.
+When it starts, the bot replaces `misty-launcher.online` with `mistly.cc` in
+the settings saved for its servers.
 
 A bot folder may hold a `background.png`: it becomes the picture behind the
-bot's cards until another one is chosen in Settings (Misty Bot ships the night
-landscape of the Misty website).
+bot's cards until another one is chosen in Settings (Mistly Bot ships the night
+landscape of the Mistly website).
 
 ## Adding a bot
 

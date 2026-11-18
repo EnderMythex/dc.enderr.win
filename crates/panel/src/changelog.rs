@@ -11,6 +11,15 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-18-mistly",
+        date: "2026-11-18",
+        title: "Misty Bot becomes Mistly Bot",
+        items: &[
+            "The bot is now called Mistly Bot, and its website is https://mistly.cc.",
+            "Links, status panel sites and download addresses saved on the servers move from misty-launcher.online to mistly.cc by themselves when the bot starts.",
+        ],
+    },
+    Entry {
         id: "2026-11-12-todo",
         date: "2026-11-12",
         title: "Staff tasks on Misty Bot",

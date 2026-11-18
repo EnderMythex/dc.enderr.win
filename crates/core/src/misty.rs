@@ -9,7 +9,17 @@
 use serde_json::{Map, Value, json};
 
 pub const REPO: &str = "Misty-MC/Misty";
-pub const SITE: &str = "https://misty-launcher.online";
+pub const SITE: &str = "https://mistly.cc";
+/// Host of the website before Misty became Mistly.
+pub const OLD_HOST: &str = "misty-launcher.online";
+/// Host of the website now.
+pub const HOST: &str = "mistly.cc";
+
+/// Saved settings with the former website replaced by the new one (links,
+/// status panel sites, download address); `None` when nothing changes.
+pub fn with_new_site(raw: &str) -> Option<String> {
+    raw.contains(OLD_HOST).then(|| raw.replace(OLD_HOST, HOST))
+}
 
 /// Is this the `state.json` of Misty?
 pub fn is_state(value: &Value) -> bool {
@@ -370,5 +380,15 @@ mod tests {
         let state = json!({ "guilds": { "1": { "verify": {} }, "2": { "verify": {} } } });
         assert!(sections(&state, "3").unwrap_err().contains("1, 2"));
         assert!(sections(&state, "2").is_ok());
+    }
+
+    #[test]
+    fn new_site() {
+        let raw = r#"{"website":"https://misty-launcher.online/","url":"https://misty-launcher.online/api/latest"}"#;
+        assert_eq!(
+            with_new_site(raw).unwrap(),
+            r#"{"website":"https://mistly.cc/","url":"https://mistly.cc/api/latest"}"#
+        );
+        assert!(with_new_site(r#"{"website":"https://mistly.cc/"}"#).is_none());
     }
 }

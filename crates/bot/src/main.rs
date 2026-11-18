@@ -110,6 +110,9 @@ async fn main() -> anyhow::Result<()> {
         dashboard_url,
     ));
     ui::set_bot_name(&def.name);
+    if def.packs.iter().any(|pack| pack == misty::PACK) {
+        misty::move_to_new_site(&app.dir);
+    }
     tracing::info!(bot = %def.slug, "starting {}", def.name);
     tokio::spawn(panels::watch(app.clone()));
     tokio::spawn(requests::watch(app.clone()));
