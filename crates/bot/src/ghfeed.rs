@@ -209,8 +209,10 @@ async fn check_releases(app: &App) {
     let servers = servers(app);
     let repos: BTreeSet<String> = servers
         .iter()
-        .filter(|(_, c)| c.releases.enabled && c.releases.channel.is_some())
-        .filter_map(|(_, c)| release_repo(&c.releases).map(str::to_owned))
+        .filter(|(_, c)| c.releases.enabled)
+        .flat_map(|(_, c)| c.releases.all_alerts())
+        .filter(|alert| alert.channel.is_some())
+        .filter_map(|alert| release_repo(&alert).map(str::to_owned))
         .collect();
     for repo in repos {
         let list = match app.github.releases(&repo).await {
@@ -236,19 +238,20 @@ async fn check_releases(app: &App) {
         for release in fresh {
             tracing::info!(repo, tag = release.tag_name, "new release");
             for (guild, config) in &servers {
-                let settings = &config.releases;
-                let Some(channel) = settings.channel.as_deref() else {
-                    continue;
-                };
-                if !settings.enabled
-                    || settings.repo != repo
-                    || (release.prerelease && !settings.prereleases)
-                {
-                    continue;
-                }
-                let msg = release_card(settings, &repo, release, true);
-                if let Err(error) = app.api.send_message(channel, &msg).await {
-                    tracing::warn!(guild, %error, "announcing a release failed");
+                for settings in config.releases.all_alerts() {
+                    let Some(channel) = settings.channel.as_deref() else {
+                        continue;
+                    };
+                    if !settings.enabled
+                        || settings.repo != repo
+                        || (release.prerelease && !settings.prereleases)
+                    {
+                        continue;
+                    }
+                    let msg = release_card(&settings, &repo, release, true);
+                    if let Err(error) = app.api.send_message(channel, &msg).await {
+                        tracing::warn!(guild, %error, "announcing a release failed");
+                    }
                 }
             }
         }

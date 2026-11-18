@@ -220,6 +220,11 @@ pub struct GuildForm {
     announce: String,
     reward_level: Vec<String>,
     reward_role: Vec<String>,
+    alert_repo: Vec<String>,
+    alert_channel: Vec<String>,
+    alert_role: Vec<String>,
+    alert_pre: Vec<String>,
+    alert_download: Vec<String>,
     domains: String,
     log_message_delete: Option<String>,
     log_message_edit: Option<String>,
@@ -429,6 +434,21 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             releases.prereleases = form.prereleases.is_some();
             releases.download_url = form.download_url;
             releases.website = form.website;
+            // One row per extra repository; rows without a repository are
+            // dropped by `sanitize`.
+            let cell = |list: &[String], index: usize| list.get(index).cloned().unwrap_or_default();
+            releases.alerts = (0..form
+                .alert_repo
+                .len()
+                .min(dc_core::guild::MAX_RELEASE_ALERTS))
+                .map(|index| dc_core::guild::ReleaseAlert {
+                    repo: cell(&form.alert_repo, index),
+                    channel: optional(cell(&form.alert_channel, index)),
+                    role: optional(cell(&form.alert_role, index)),
+                    prereleases: cell(&form.alert_pre, index) == "yes",
+                    download_url: cell(&form.alert_download, index),
+                })
+                .collect();
         }
         "github" => {
             config.github.enabled = enabled;
@@ -1402,6 +1422,30 @@ mod tests {
         assert_eq!(config.logs.channel.as_deref(), Some(CHANNEL));
         assert_eq!(config.welcome, GuildConfig::default().welcome);
         assert_eq!(config.xp, GuildConfig::default().xp);
+    }
+
+    #[test]
+    fn several_release_alerts() {
+        let config = saved(
+            "releases",
+            GuildForm {
+                enabled: Some("on".into()),
+                repo: "Misty-MC/Misty".into(),
+                channel: CHANNEL.into(),
+                alert_repo: vec!["https://github.com/Misty-MC/Misty-Web".into(), "".into()],
+                alert_channel: vec![CHANNEL.into(), CHANNEL.into()],
+                alert_role: vec![ROLE.into(), "".into()],
+                alert_pre: vec!["yes".into(), "no".into()],
+                alert_download: vec!["https://mistly.cc/".into(), "".into()],
+                ..Default::default()
+            },
+        );
+        let alerts = &config.releases.alerts;
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].repo, "Misty-MC/Misty-Web");
+        assert_eq!(alerts[0].role.as_deref(), Some(ROLE));
+        assert!(alerts[0].prereleases);
+        assert_eq!(config.releases.all_alerts().len(), 2);
     }
 
     #[test]

@@ -1564,6 +1564,38 @@ fn guild_fields(
                 @if bot.def.packs.iter().any(|p| p == dc_core::commands::MISTY) {
                     p.hint { "/release and /download show the latest version of this repository." }
                 }
+                fieldset.checks {
+                    legend { "More repositories" }
+                    p.hint {
+                        "Up to " (dc_core::guild::MAX_RELEASE_ALERTS) ", each announced in its own channel with its own role. "
+                        "They use the switch, the website and the look of this section. Leave the repository empty to remove a row."
+                    }
+                    @let rows = (releases.alerts.len() + 1).clamp(2, dc_core::guild::MAX_RELEASE_ALERTS);
+                    @for index in 0..rows {
+                        @let alert = releases.alerts.get(index);
+                        div.alert-row {
+                            input type="text" name="alert_repo" maxlength="200" placeholder="owner/name"
+                                aria-label="Repository" value=[alert.map(|a| a.repo.as_str())];
+                            select name="alert_channel" aria-label="Channel" {
+                                option value="" { "— Channel —" }
+                                @for channel in text_channels() {
+                                    option value=(channel.id) selected[alert.and_then(|a| a.channel.as_deref()) == Some(channel.id.as_str())] {
+                                        "# " (channel.name)
+                                    }
+                                }
+                            }
+                            select name="alert_role" aria-label="Role mentioned" data-warn="give" data-warn-label="Release role" {
+                                (role_options(roles, alert.and_then(|a| a.role.as_deref())))
+                            }
+                            select name="alert_pre" aria-label="Pre-releases" {
+                                option value="no" selected[!alert.is_some_and(|a| a.prereleases)] { "Releases only" }
+                                option value="yes" selected[alert.is_some_and(|a| a.prereleases)] { "With pre-releases" }
+                            }
+                            input type="url" name="alert_download" maxlength="300" placeholder="Download link (optional)"
+                                aria-label="Download link" value=[alert.map(|a| a.download_url.as_str())];
+                        }
+                    }
+                }
                 (look_fields(&releases.look, false))
                 p.hint { "Default: blue, amber for pre-releases. The banner shows the version and its date." }
             }
@@ -1865,7 +1897,7 @@ fn guild_preview(
                 blocks,
                 html! {},
                 "Send the latest",
-                "Posts the latest release of the repository in the channel (without mentioning the role).",
+                "Posts the latest release of each repository in its channel (without mentioning the roles).",
             )
         }
         "github" => {

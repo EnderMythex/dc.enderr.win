@@ -139,25 +139,38 @@ async fn test(app: &App, guild_id: &str, module: &str, user_id: &str) -> Result<
             (channel, logs::sample())
         }
         "releases" => {
-            let settings = &config.releases;
-            let Some(channel) = settings.channel.clone() else {
-                return missing("an announcement channel");
+            // The latest version of every repository, each in its channel.
+            let mut posted = Vec::new();
+            for settings in config.releases.all_alerts() {
+                let Some(channel) = settings.channel.clone() else {
+                    continue;
+                };
+                let Some(repo) = crate::ghfeed::release_repo(&settings) else {
+                    continue;
+                };
+                let releases = app
+                    .github
+                    .releases(repo)
+                    .await
+                    .map_err(|error| format!("GitHub ({repo}): {error}"))?;
+                let Some(latest) = crate::github::latest(&releases) else {
+                    return Err(format!("{repo} has no release yet."));
+                };
+                let msg = marked(crate::ghfeed::release_card(&settings, repo, latest, false));
+                app.api
+                    .send_message(&channel, &msg)
+                    .await
+                    .map_err(|error| error.user_message())?;
+                posted.push(format!(
+                    "{repo} in {}",
+                    channel_label(app, guild_id, &channel)
+                ));
+            }
+            return if posted.is_empty() {
+                missing("a repository and its channel")
+            } else {
+                Ok(format!("Latest version sent: {}.", posted.join(", ")))
             };
-            let Some(repo) = crate::ghfeed::release_repo(settings) else {
-                return missing("a repository");
-            };
-            let releases = app
-                .github
-                .releases(repo)
-                .await
-                .map_err(|error| format!("GitHub: {error}"))?;
-            let Some(latest) = crate::github::latest(&releases) else {
-                return Err(format!("{repo} has no release yet."));
-            };
-            (
-                channel,
-                marked(crate::ghfeed::release_card(settings, repo, latest, false)),
-            )
         }
         "github" => {
             let feed = &config.github;

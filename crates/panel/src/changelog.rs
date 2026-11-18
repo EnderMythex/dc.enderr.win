@@ -11,6 +11,15 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-18-release-alerts",
+        date: "2026-11-18",
+        title: "Several release announcements",
+        items: &[
+            "Release announcements: up to 10 more repositories, each posted in its own channel with its own role, pre-releases and download link.",
+            "The test button sends the latest version of every repository to its channel.",
+        ],
+    },
+    Entry {
         id: "2026-11-18-mistly",
         date: "2026-11-18",
         title: "Misty Bot becomes Mistly Bot",

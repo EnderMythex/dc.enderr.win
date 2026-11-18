@@ -776,3 +776,11 @@ body.activity { display: grid; place-items: center; padding: 24px; }
 .command-switch input:focus-visible + .switch-track { outline: 2px solid var(--strong); outline-offset: 2px; }
 .commands li.off .command-line, .commands li.off p { opacity: 0.45; }
 .captcha-sample { display: block; width: 100%; max-width: 460px; height: auto; border: 1px solid var(--border-strong); border-radius: 12px; }
+
+/* Release announcements: one row per extra repository. */
+.alert-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.9fr 1.3fr; gap: 8px; }
+.alert-row + .alert-row { margin-top: 8px; }
+@media (max-width: 760px) {
+  .alert-row { grid-template-columns: 1fr 1fr; padding-bottom: 8px; border-bottom: 1px dashed var(--border); }
+  .alert-row input[name="alert_repo"], .alert-row input[name="alert_download"] { grid-column: 1 / -1; }
+}

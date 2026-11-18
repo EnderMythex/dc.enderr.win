@@ -127,6 +127,49 @@ pub struct Releases {
     pub website: String,
     /// Side color of the announcements (the banner is always shown).
     pub look: Look,
+    /// More repositories announced, each in its own channel with its own
+    /// role. They share the switch, the website and the look above.
+    pub alerts: Vec<ReleaseAlert>,
+}
+
+/// Most extra release alerts of a server.
+pub const MAX_RELEASE_ALERTS: usize = 10;
+
+/// One more repository whose new versions are announced.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReleaseAlert {
+    /// `owner/name`.
+    pub repo: String,
+    pub channel: Option<String>,
+    /// Role mentioned with each new version.
+    pub role: Option<String>,
+    pub prereleases: bool,
+    /// "Download" button; empty: the release page on GitHub.
+    pub download_url: String,
+}
+
+impl Releases {
+    /// Every release alert: the main one, then the extra ones (with the
+    /// switch, website and look of the main one).
+    pub fn all_alerts(&self) -> Vec<Releases> {
+        let main = Releases {
+            alerts: Vec::new(),
+            ..self.clone()
+        };
+        let extra = self.alerts.iter().map(|alert| Releases {
+            enabled: self.enabled,
+            channel: alert.channel.clone(),
+            role: alert.role.clone(),
+            repo: alert.repo.clone(),
+            prereleases: alert.prereleases,
+            download_url: alert.download_url.clone(),
+            website: self.website.clone(),
+            look: self.look.clone(),
+            alerts: Vec::new(),
+        });
+        std::iter::once(main).chain(extra).collect()
+    }
 }
 
 /// Commits, pull requests, issues, stars, forks and tags of repositories.
@@ -883,6 +926,14 @@ impl GuildConfig {
         clean_repo(&mut releases.repo);
         clean_url(&mut releases.download_url);
         clean_url(&mut releases.website);
+        for alert in &mut releases.alerts {
+            clean_id(&mut alert.channel);
+            clean_id(&mut alert.role);
+            clean_repo(&mut alert.repo);
+            clean_url(&mut alert.download_url);
+        }
+        releases.alerts.retain(|alert| !alert.repo.is_empty());
+        releases.alerts.truncate(MAX_RELEASE_ALERTS);
 
         let github = &mut self.github;
         clean_id(&mut github.channel);
@@ -1160,6 +1211,22 @@ mod tests {
         assert_eq!(c.releases.download_url, "");
         assert_eq!(c.minecraft.address, "play.misty.fr:25565b");
         assert_eq!(c.status.repo_or(&c.releases), "Misty-MC/Misty");
+
+        c.releases.alerts = vec![
+            ReleaseAlert {
+                repo: "https://github.com/Misty-MC/Misty-Web".into(),
+                channel: Some("175928847299117063".into()),
+                ..Default::default()
+            },
+            ReleaseAlert::default(),
+        ];
+        c.sanitize();
+        assert_eq!(c.releases.alerts.len(), 1);
+        let all = c.releases.all_alerts();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[1].repo, "Misty-MC/Misty-Web");
+        assert_eq!(all[1].look, c.releases.look);
+        assert!(all.iter().all(|alert| alert.alerts.is_empty()));
     }
 
     #[test]

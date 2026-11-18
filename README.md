@@ -79,7 +79,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Twitch alerts | — | Twitch: streamers, channel, role (needs `TWITCH_CLIENT_ID_<SLUG>` and `TWITCH_CLIENT_SECRET_<SLUG>`) |
 | Safety reminders | — | Safety reminders: French and English channels, interval |
 | Members | `/stats` `/missing-role` | — |
-| Release announcements | `/release` `/download` (misty pack) | Releases: repository, channel, role, pre-releases, download and website links |
+| Release announcements | `/release` `/download` (misty pack) | Releases: repository, channel, role, pre-releases, download and website links; up to 10 more repositories, each with its own channel, role, pre-releases and download link |
 | GitHub activity | — | GitHub activity: repositories, channel, commits / pull requests / issues / stars / forks / tags |
 | Status panel | `/status` (misty pack) | Status panel: websites (up, slow, down, with history), version, downloads, players, stars |
 | Minecraft server | `/smp` (misty pack) | Minecraft server: address (SRV records followed), name, description, players, panel channel |
