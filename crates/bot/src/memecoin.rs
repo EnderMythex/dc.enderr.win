@@ -1,7 +1,11 @@
 //! Token contract addresses ("CA" of a memecoin) posted by members who
 //! joined recently: the message is deleted, the author timed out briefly and
-//! told why in a private message. Wallet addresses are left alone: Solana
-//! tells the two apart (a token is a "mint" account, a wallet is not).
+//! told why in a private message. Wallet addresses are left alone. A wallet
+//! and a token look the same, so the bot asks:
+//! - Solana itself: a token is a "mint" account, a wallet is not;
+//! - DexScreener for every chain (Ethereum, Base, BSC, Arbitrum, Tron, TON,
+//!   Sui…, and Solana tokens not caught above): a token has trading pairs, a
+//!   wallet has none.
 
 use std::{
     collections::HashMap,
@@ -9,6 +13,7 @@ use std::{
     time::Duration,
 };
 
+use regex::Regex;
 use serde_json::{Value, json};
 
 use crate::{
@@ -19,6 +24,8 @@ use crate::{
 };
 
 const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
+/// Pairs of up to 30 tokens, on every chain.
+const DEXSCREENER: &str = "https://api.dexscreener.com/latest/dex/tokens/";
 /// Addresses looked at per message.
 const MAX_CANDIDATES: usize = 5;
 /// Addresses whose kind is remembered.
@@ -32,21 +39,47 @@ fn is_base58(c: char) -> bool {
 /// Is each address a token (`true`) or something else, a wallet (`false`)?
 static KNOWN: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
 
-/// The Solana addresses written in a message (links included: a pump.fun or
-/// Dexscreener link carries the address too).
+/// EVM (Ethereum, Base, BSC, Arbitrum, Polygon, Avalanche…): `0x` + 40 hex.
+static EVM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b0x[0-9a-fA-F]{40}\b").unwrap());
+/// Sui coin type: `0x…::module::NAME`.
+static SUI: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b0x[0-9a-fA-F]{64}::[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*").unwrap()
+});
+/// TON: `EQ…` or `UQ…`, 48 characters.
+static TON: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[^A-Za-z0-9_-])([EU]Q[A-Za-z0-9_-]{46})(?:$|[^A-Za-z0-9_-])").unwrap()
+});
+
+/// Solana and Tron addresses: 32 to 44 base58 characters.
+fn is_solana_shaped(address: &str) -> bool {
+    (32..=44).contains(&address.len()) && address.chars().all(is_base58)
+}
+
+/// The blockchain addresses written in a message (links included: a
+/// pump.fun, Dexscreener or Etherscan link carries the address too).
 pub fn candidates(content: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
+    let mut add = |address: &str| {
+        if found.len() < MAX_CANDIDATES && !found.iter().any(|f| f.eq_ignore_ascii_case(address)) {
+            found.push(address.to_owned());
+        }
+    };
+    for m in SUI.find_iter(content) {
+        add(m.as_str());
+    }
+    for m in EVM.find_iter(content) {
+        add(m.as_str());
+    }
+    for caps in TON.captures_iter(content) {
+        add(&caps[1]);
+    }
     for word in content
         .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| word.chars().all(is_base58))
+        .filter(|word| is_solana_shaped(word))
     {
         // A real address mixes letters and digits; a long plain word does not.
-        let digits = word.chars().filter(char::is_ascii_digit).count();
-        if (32..=44).contains(&word.len()) && digits >= 2 && !found.iter().any(|f| f == word) {
-            found.push(word.to_owned());
-            if found.len() >= MAX_CANDIDATES {
-                break;
-            }
+        if word.chars().filter(char::is_ascii_digit).count() >= 2 {
+            add(word);
         }
     }
     found
@@ -59,10 +92,60 @@ fn is_mint(account: &Value) -> bool {
     program.starts_with("spl-token") && data["parsed"]["type"] == "mint"
 }
 
-/// Without an answer from Solana: pump.fun-style addresses ("...pump") are
-/// tokens, anything else is given the benefit of the doubt.
+/// Without any answer: pump.fun-style addresses ("...pump") are tokens,
+/// anything else is given the benefit of the doubt.
 fn guess(address: &str) -> bool {
     address.ends_with("pump") || address.ends_with("bonk")
+}
+
+/// Which of these Solana addresses are token mints; `None` if Solana did
+/// not answer.
+async fn solana_mints(app: &App, addresses: &[String]) -> Option<Vec<bool>> {
+    let rpc = std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC.to_owned());
+    let body = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
+        "params": [addresses, { "encoding": "jsonParsed" }],
+    });
+    let response = app
+        .web
+        .post(&rpc)
+        .json(&body)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+        .ok()
+        .filter(|response| response.status().is_success())?;
+    let answer: Value = response.json().await.ok()?;
+    let accounts = answer["result"]["value"].as_array()?;
+    (accounts.len() == addresses.len()).then(|| accounts.iter().map(is_mint).collect())
+}
+
+/// The addresses (lowercase) that are tokens with trading pairs on
+/// DexScreener, any chain; `None` if DexScreener did not answer.
+fn listed_tokens(answer: &Value) -> Vec<String> {
+    let mut listed = Vec::new();
+    for pair in answer["pairs"].as_array().into_iter().flatten() {
+        for side in ["baseToken", "quoteToken"] {
+            if let Some(address) = pair[side]["address"].as_str() {
+                listed.push(address.to_lowercase());
+            }
+        }
+    }
+    listed
+}
+
+async fn dexscreener(app: &App, addresses: &[String]) -> Option<Vec<String>> {
+    let url = format!("{DEXSCREENER}{}", addresses.join(","));
+    let response = app
+        .web
+        .get(&url)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+        .ok()
+        .filter(|response| response.status().is_success())?;
+    let answer: Value = response.json().await.ok()?;
+    Some(listed_tokens(&answer))
 }
 
 /// The tokens among these addresses.
@@ -76,49 +159,53 @@ async fn tokens(app: &App, addresses: &[String]) -> Vec<String> {
             .collect()
     };
     if !unknown.is_empty() {
-        let rpc = std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC.to_owned());
-        let body = json!({
-            "jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
-            "params": [unknown, { "encoding": "jsonParsed" }],
-        });
-        let answer = app
-            .web
-            .post(&rpc)
-            .json(&body)
-            .timeout(Duration::from_secs(6))
-            .send()
-            .await;
-        let parsed: Option<Value> = match answer {
-            Ok(response) if response.status().is_success() => response.json().await.ok(),
-            _ => None,
-        };
-        let accounts = parsed
-            .as_ref()
-            .and_then(|v| v["result"]["value"].as_array());
+        let mut verdicts: HashMap<String, bool> = HashMap::new();
+        // 1. Solana: a mint is a token, even before it trades anywhere.
+        let solana: Vec<String> = unknown
+            .iter()
+            .filter(|a| is_solana_shaped(a))
+            .cloned()
+            .collect();
+        if !solana.is_empty() {
+            match solana_mints(app, &solana).await {
+                Some(mints) => {
+                    for (address, mint) in solana.iter().zip(mints) {
+                        if mint {
+                            verdicts.insert(address.clone(), true);
+                        }
+                    }
+                }
+                None => tracing::warn!("Solana did not answer"),
+            }
+        }
+        // 2. Every chain: a token has trading pairs, a wallet has none.
+        let rest: Vec<String> = unknown
+            .iter()
+            .filter(|a| !verdicts.contains_key(*a))
+            .cloned()
+            .collect();
+        if !rest.is_empty() {
+            match dexscreener(app, &rest).await {
+                Some(listed) => {
+                    for address in rest {
+                        let token = listed.contains(&address.to_lowercase());
+                        verdicts.insert(address, token);
+                    }
+                }
+                None => tracing::warn!("DexScreener did not answer"),
+            }
+        }
+        // Undecided addresses are not remembered: asked again next time.
         let mut known = KNOWN.lock().unwrap();
         if known.len() > MAX_REMEMBERED {
             known.clear();
         }
-        match accounts {
-            Some(accounts) if accounts.len() == unknown.len() => {
-                for (address, account) in unknown.iter().zip(accounts) {
-                    known.insert(address.clone(), is_mint(account));
-                }
-            }
-            _ => {
-                tracing::warn!(
-                    "Solana did not answer: contract addresses guessed from their suffix"
-                );
-                // Not remembered: Solana is asked again next time.
-                drop(known);
-                return addresses.iter().filter(|a| guess(a)).cloned().collect();
-            }
-        }
+        known.extend(verdicts);
     }
     let known = KNOWN.lock().unwrap();
     addresses
         .iter()
-        .filter(|a| known.get(*a).copied().unwrap_or(false))
+        .filter(|a| known.get(*a).copied().unwrap_or_else(|| guess(a)))
         .cloned()
         .collect()
 }
@@ -229,8 +316,24 @@ mod tests {
         // Long words and short codes are not addresses.
         assert!(candidates("Supercalifragilisticexpialidociousandmore words").is_empty());
         assert!(candidates("my code AB12CD34").is_empty());
-        // 0x addresses (EVM) are not Solana addresses.
-        assert!(candidates("0x6982508145454Ce325dDbE47a25d4ec3d2311933").is_empty());
+        // Other chains.
+        let pepe = "0x6982508145454Ce325dDbE47a25d4ec3d2311933";
+        assert_eq!(candidates(&format!("ca: {pepe}")), vec![pepe]);
+        assert_eq!(
+            candidates(&format!("https://etherscan.io/token/{pepe}?a=1")),
+            vec![pepe]
+        );
+        let sui = format!("0x{}::coin::DOGE", "a1".repeat(32));
+        assert_eq!(candidates(&format!("sui {sui} !")), vec![sui.clone()]);
+        let ton = format!(
+            "EQ{}",
+            "Ab9_-x".repeat(8).chars().take(46).collect::<String>()
+        );
+        assert_eq!(candidates(&format!("ton {ton}")), vec![ton]);
+        let tron = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+        assert_eq!(candidates(tron), vec![tron]);
+        // A transaction hash (64 hex) is not an address.
+        assert!(candidates(&format!("tx 0x{}", "ab".repeat(32))).is_empty());
     }
 
     #[test]
@@ -246,6 +349,17 @@ mod tests {
         assert!(!is_mint(&token_account) && !is_mint(&wallet) && !is_mint(&Value::Null));
         assert!(guess("9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"));
         assert!(!guess(MINT));
+    }
+
+    #[test]
+    fn dexscreener_pairs() {
+        let answer = json!({ "pairs": [
+            { "chainId": "ethereum", "baseToken": { "address": "0x6982508145454Ce325dDbE47a25d4ec3d2311933" },
+              "quoteToken": { "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" } },
+        ] });
+        let listed = listed_tokens(&answer);
+        assert!(listed.contains(&"0x6982508145454ce325ddbe47a25d4ec3d2311933".to_owned()));
+        assert!(listed_tokens(&json!({ "pairs": null })).is_empty());
     }
 
     #[test]

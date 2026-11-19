@@ -11,6 +11,14 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-19-ca-chains",
+        date: "2026-11-19",
+        title: "Token addresses on every chain",
+        items: &[
+            "Token addresses from new members are now caught on Ethereum, Base, BSC, Arbitrum and the other EVM chains, Tron, TON and Sui, not only Solana. Wallets stay allowed: an address counts as a token when it trades on DexScreener.",
+        ],
+    },
+    Entry {
         id: "2026-11-19-anti-scam-pnl-ca",
         date: "2026-11-19",
         title: "Anti-scam: PnL cards, token addresses from new members",

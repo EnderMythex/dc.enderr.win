@@ -72,7 +72,7 @@ with their Discord account — and the bot itself. 100 % Rust monorepo.
 | Logs | `/settings logs` | Logs: deleted / edited messages, channels, members, moderation |
 | Announcements | `/announce` (form with title and text, picture, @everyone / @here / role) · `/maintenance start\|end` | — |
 | Giveaways | `/giveaway start\|end\|reroll\|cancel\|list`: Enter button with live count, optional required role, automatic draw, rerolls without previous winners | — |
-| Anti-scam | — | Anti-scam: Discord invites (even disguised), the "insider" pitch, scam pictures checked by AI (Gemini; PnL cards are never scams), token contract addresses (Solana CA, not wallets) from members who joined less than N days ago: deleted, short timeout, DM (on by default with the `scanline` pack; `SOLANA_RPC_URL` optional), staff channel with Unban |
+| Anti-scam | — | Anti-scam: Discord invites (even disguised), the "insider" pitch, scam pictures checked by AI (Gemini; PnL cards are never scams), token contract addresses (CA on Solana, EVM chains, Tron, TON, Sui; not wallets: checked with Solana and DexScreener) from members who joined less than N days ago: deleted, short timeout, DM (on by default with the `scanline` pack; `SOLANA_RPC_URL` optional), staff channel with Unban |
 | Link reviews | — | Link lock: watched channels, x.com blocked per channel, timeout, the member can send the link to the staff who accepts or refuses it |
 | Role panel | — | Role panel: up to 10 buttons to take or drop a role |
 | AI assistant | mention the bot | AI assistant: knowledge, channels, length, cooldown (needs `GEMINI_API_KEY_<SLUG>`) |

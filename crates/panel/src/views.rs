@@ -1464,7 +1464,7 @@ fn guild_fields(
                 @if rules.images && !has_secret(bot, "GEMINI_API_KEY") {
                     (missing_secret("Checking pictures", &format!("GEMINI_API_KEY_{}", bot.def.slug.to_uppercase().replace('-', "_"))))
                 }
-                (switch("new_member_ca", "Block token addresses from new members", "A memecoin contract address (CA, Solana) posted by a member who joined recently: the message is deleted, the member is timed out briefly and gets a private message explaining why. Wallet addresses are allowed: the bot asks Solana whether the address is a token.", rules.blocks_new_member_ca(&bot.def.packs)))
+                (switch("new_member_ca", "Block token addresses from new members", "A memecoin contract address (CA) posted by a member who joined recently, on any chain (Solana, Ethereum, Base, BSC, Arbitrum, Tron, TON, Sui…): the message is deleted, the member is timed out briefly and gets a private message explaining why. Wallet addresses are allowed: the bot asks Solana and DexScreener whether the address is a token.", rules.blocks_new_member_ca(&bot.def.packs)))
                 div.field-row {
                     (number_input("ca_days", "New member: on the server for less than (days)", "", rules.ca_min_days, 1, 90))
                     (number_input("ca_timeout", "Timeout (seconds)", "0: none. 60 = 1 minute.", rules.ca_timeout_secs, 0, 86_400))
