@@ -198,6 +198,9 @@ pub struct GuildForm {
     invites: Option<String>,
     insider: Option<String>,
     images: Option<String>,
+    new_member_ca: Option<String>,
+    ca_days: String,
+    ca_timeout: String,
     button_role: Vec<String>,
     button_label: Vec<String>,
     button_emoji: Vec<String>,
@@ -382,6 +385,9 @@ fn apply_form(config: &mut GuildConfig, module: &str, form: GuildForm) {
             config.anti_scam.insider = form.insider.is_some();
             config.anti_scam.images = form.images.is_some();
             config.anti_scam.staff_channel = optional(form.channel);
+            config.anti_scam.new_member_ca = Some(form.new_member_ca.is_some());
+            config.anti_scam.ca_min_days = number(&form.ca_days, 7);
+            config.anti_scam.ca_timeout_secs = number(&form.ca_timeout, 60);
         }
         "roles" => {
             config.role_panel.enabled = enabled;

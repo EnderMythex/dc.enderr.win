@@ -498,7 +498,8 @@ async fn scam_picture(app: &App, message: &Value) -> Option<(Vec<u8>, String, [u
 pub async fn check(app: &App, guild: &str, message: &Value, is_edit: bool) -> bool {
     let config = app.config(guild);
     let rules = &config.anti_scam;
-    if !(rules.invites || rules.insider || rules.images) {
+    let new_member_ca = rules.blocks_new_member_ca(&app.packs);
+    if !(rules.invites || rules.insider || rules.images || new_member_ca) {
         return false;
     }
     let user = str_of(&message["author"], "id");
@@ -542,6 +543,10 @@ pub async fn check(app: &App, guild: &str, message: &Value, is_edit: bool) -> bo
         {
             report(app, guild, message, "Scam message removed", sanction, None).await;
         }
+        return true;
+    }
+
+    if new_member_ca && crate::memecoin::check(app, guild, message).await {
         return true;
     }
 

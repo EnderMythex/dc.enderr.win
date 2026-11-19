@@ -284,7 +284,23 @@ fn image_verdict(answer: &str) -> Option<bool> {
             .as_str()
             .is_some_and(|q| q.trim().chars().filter(|c| c.is_alphanumeric()).count() >= 6)
     };
-    Some(verdict == "SCAM" && quoted("promesse_gains") && quoted("invitation_contact"))
+    // A PnL card (trading results) is never a scam, and a promise of gains
+    // is a sentence: "+523% $1,234.56" alone does not count.
+    let pnl_card = value["carte_pnl"].as_bool().unwrap_or(false);
+    let sentence = value["promesse_gains"].as_str().is_some_and(|quote| {
+        quote
+            .split_whitespace()
+            .filter(|word| word.chars().filter(|c| c.is_alphabetic()).count() >= 2)
+            .count()
+            >= 3
+    });
+    Some(
+        verdict == "SCAM"
+            && !pnl_card
+            && sentence
+            && quoted("promesse_gains")
+            && quoted("invitation_contact"),
+    )
 }
 
 static MARKDOWN_LINK: LazyLock<Regex> =
@@ -362,10 +378,13 @@ SCAM = l'image est une PUB DE RECRUTEMENT adressée à des inconnus. Il faut que
 
 N'est PAS un scam (réponds OK) : une capture de conversation privée ordinaire, une page ou carte de profil sans promesse de gains écrite, un pseudo avec un $ ou un nombre de followers, une capture de PnL ou de gains personnels sans sollicitation, des graphiques, tokens, memes, tutoriels, tweets, pubs de plateformes connues.
 
+CARTE PnL = une carte ou capture de résultats de trading d'un memecoin ou d'un token (Axiom, GMGN, Photon, BullX, Padre, Terminal, Trojan, BonkBot, Maestro, Pump.fun, Dexscreener, Phantom...) : nom ou ticker du token, pourcentage, montant gagné ou perdu, investi / vendu, prix, durée, souvent avec le pseudo du trader, un code ou lien de parrainage (referral), un QR code ou le logo de la plateforme. Une carte PnL est TOUJOURS OK, même avec un gros gain, un pseudo, un @, un lien, un QR code ou un code de parrainage : ce sont des résultats montrés, pas une promesse faite aux autres, et un code de parrainage n'est pas une invitation à le contacter en privé.
+La promesse de gains doit être une PHRASE adressée aux autres (\"je vais te faire gagner\", \"rejoins-moi pour gagner X\") : un chiffre, un pourcentage ou un montant seul n'en est jamais une.
+
 REPORT = le membre montre une pub de ce genre pour la signaler, prévenir les autres ou demander si c'est une arnaque.
 
 Réponds uniquement avec ce JSON :
-{\"promesse_gains\": \"citation exacte du texte de l'image qui promet des gains, ou chaîne vide\", \"invitation_contact\": \"citation exacte du texte de l'image qui invite à le contacter en privé, ou chaîne vide\", \"verdict\": \"SCAM\" ou \"REPORT\" ou \"OK\"}
+{\"carte_pnl\": true ou false, \"promesse_gains\": \"citation exacte du texte de l'image qui promet des gains, ou chaîne vide\", \"invitation_contact\": \"citation exacte du texte de l'image qui invite à le contacter en privé, ou chaîne vide\", \"verdict\": \"SCAM\" ou \"REPORT\" ou \"OK\"}
 Ne cite que du texte réellement visible dans l'image, sans l'inventer ni le reformuler.";
 
 #[cfg(test)]
@@ -410,6 +429,20 @@ mod tests {
             Some(false)
         );
         assert_eq!(image_verdict("SCAM"), None);
+        // A PnL card with a referral code is never a scam.
+        assert_eq!(
+            image_verdict(
+                r#"{"carte_pnl":true,"promesse_gains":"Je cherche 10 personnes pour gagner","invitation_contact":"Join with my referral code","verdict":"SCAM"}"#
+            ),
+            Some(false)
+        );
+        // Numbers alone are not a promise.
+        assert_eq!(
+            image_verdict(
+                r#"{"carte_pnl":false,"promesse_gains":"+523% +$12,450.32 PnL","invitation_contact":"axiom.trade/@trader scan to join","verdict":"SCAM"}"#
+            ),
+            Some(false)
+        );
     }
 
     #[test]

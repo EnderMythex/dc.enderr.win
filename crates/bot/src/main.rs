@@ -20,6 +20,7 @@ mod linkguard;
 mod logs;
 mod massrole;
 mod members;
+mod memecoin;
 mod minecraft;
 mod misty;
 mod moderation;

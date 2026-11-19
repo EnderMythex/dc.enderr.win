@@ -359,7 +359,7 @@ pub struct LockUrl {
 }
 
 /// Automatic protection against scams. Sanctions never touch bot admins.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AntiScam {
     /// Discord invite links (even disguised): message deleted, author kicked.
@@ -372,6 +372,36 @@ pub struct AntiScam {
     /// Where the staff is told about scam images and failed sanctions, with
     /// an Unban button.
     pub staff_channel: Option<String>,
+    /// Token contract addresses (Solana memecoin CAs, not wallets) posted by
+    /// members who joined recently: message deleted, short timeout, DM.
+    /// `None`: on for bots with the `scanline` pack, off for the others.
+    pub new_member_ca: Option<bool>,
+    /// "Recently": fewer days on the server than this.
+    pub ca_min_days: u32,
+    /// Timeout of the author, in seconds (0: none).
+    pub ca_timeout_secs: u32,
+}
+
+impl Default for AntiScam {
+    fn default() -> Self {
+        Self {
+            invites: false,
+            insider: false,
+            images: false,
+            staff_channel: None,
+            new_member_ca: None,
+            ca_min_days: 7,
+            ca_timeout_secs: 60,
+        }
+    }
+}
+
+impl AntiScam {
+    /// Is the contract address rule on, for a bot with these packs?
+    pub fn blocks_new_member_ca(&self, packs: &[String]) -> bool {
+        self.new_member_ca
+            .unwrap_or_else(|| packs.iter().any(|pack| pack == crate::commands::SCANLINE))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -908,6 +938,8 @@ impl GuildConfig {
         clean_id(&mut reminders.channel_en);
         reminders.interval_hours = reminders.interval_hours.clamp(6, 24 * 14);
 
+        self.anti_scam.ca_min_days = self.anti_scam.ca_min_days.clamp(1, 90);
+        self.anti_scam.ca_timeout_secs = self.anti_scam.ca_timeout_secs.min(86_400);
         self.rules.look.sanitize();
         self.rules.verify_look.sanitize();
         self.tickets.look.sanitize();

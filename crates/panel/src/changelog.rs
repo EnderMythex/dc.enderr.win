@@ -11,6 +11,15 @@ pub struct Entry {
 
 pub const ENTRIES: &[Entry] = &[
     Entry {
+        id: "2026-11-19-anti-scam-pnl-ca",
+        date: "2026-11-19",
+        title: "Anti-scam: PnL cards, token addresses from new members",
+        items: &[
+            "Pictures checked by AI: PnL cards (Axiom, GMGN, Photon, Padre…) are never treated as scam ads anymore, even with a referral code, a QR code or a big gain.",
+            "New: a memecoin contract address (CA) posted by a member who joined less than 7 days ago is deleted, its author timed out for 1 minute and told why in a private message. Wallet addresses stay allowed. On by default on Scanline, in the Anti-scam section.",
+        ],
+    },
+    Entry {
         id: "2026-11-18-release-alerts",
         date: "2026-11-18",
         title: "Several release announcements",
